@@ -14,10 +14,18 @@ import {
 } from "@/lib/types";
 import {
   archiveMedication,
+  attachMedicationPhoto,
+  deleteDocument,
   deleteDoseLog,
   logScheduledDose,
   setMedicationPrivacy,
 } from "@/app/medications/actions";
+import {
+  DOCUMENTS_BUCKET,
+  DOCUMENT_TYPES,
+  DOCUMENT_TYPE_LABELS,
+  SIGNED_URL_TTL_SECONDS,
+} from "@/lib/documents";
 import { LogDoseForm } from "./log-dose-form";
 
 type Regimen = {
@@ -131,6 +139,27 @@ export default async function MedicationDetailPage({
     .order("logged_at", { ascending: false })
     .limit(50);
   const logs = logData ?? [];
+
+  // Attached documents + short-lived signed URLs (PRD §6.2). RLS scopes the
+  // rows; the signed URLs respect storage RLS (is_private-aware).
+  const { data: docData } = await supabase
+    .from("documents")
+    .select("id, storage_path, file_name, mime_type, document_type, uploaded_at")
+    .eq("linked_medication_id", med.id)
+    .order("uploaded_at", { ascending: false });
+  const docs = docData ?? [];
+  const docUrls = new Map<string, string>();
+  if (docs.length > 0) {
+    const { data: signed } = await supabase.storage
+      .from(DOCUMENTS_BUCKET)
+      .createSignedUrls(
+        docs.map((d) => d.storage_path),
+        SIGNED_URL_TTL_SECONDS
+      );
+    for (const s of signed ?? []) {
+      if (s.path && s.signedUrl) docUrls.set(s.path, s.signedUrl);
+    }
+  }
 
   return (
     <div className="min-h-full">
@@ -272,6 +301,96 @@ export default async function MedicationDetailPage({
           ) : (
             <p className="mt-2 text-sm text-faint">Not set.</p>
           )}
+        </section>
+
+        {/* Photos & documents (PRD §5.1). Attach a vial/prescription photo for
+            your records; reading + extraction (step 8) build on this. */}
+        <section className="rounded-md border border-line p-4">
+          <h2 className="text-sm font-medium text-paper">Photos &amp; documents</h2>
+
+          {docs.length > 0 ? (
+            <ul className="mt-3 flex flex-wrap gap-3">
+              {docs.map((d) => {
+                const url = docUrls.get(d.storage_path);
+                const isImage = d.mime_type.startsWith("image/");
+                return (
+                  <li key={d.id} className="relative">
+                    <a
+                      href={url ?? "#"}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block h-20 w-20 overflow-hidden rounded-md border border-line bg-surface"
+                      title={d.file_name}
+                    >
+                      {isImage && url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={url}
+                          alt={d.file_name}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <span className="flex h-full w-full items-center justify-center text-xs text-faint">
+                          {d.mime_type === "application/pdf" ? "PDF" : "FILE"}
+                        </span>
+                      )}
+                    </a>
+                    {canLog ? (
+                      <form action={deleteDocument} className="mt-1 text-center">
+                        <input type="hidden" name="medication_id" value={med.id} />
+                        <input type="hidden" name="document_id" value={d.id} />
+                        <button
+                          type="submit"
+                          className="text-xs text-faint underline hover:text-muted"
+                        >
+                          remove
+                        </button>
+                      </form>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="mt-2 text-sm text-faint">No photos attached.</p>
+          )}
+
+          {canLog ? (
+            <form
+              action={attachMedicationPhoto}
+              className="mt-4 flex flex-wrap items-end gap-3 border-t border-line pt-4"
+            >
+              <input type="hidden" name="medication_id" value={med.id} />
+              <label className="block text-sm text-muted">
+                Type
+                <select
+                  name="document_type"
+                  defaultValue="vial_photo"
+                  className="mt-1 block rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent"
+                >
+                  {DOCUMENT_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {DOCUMENT_TYPE_LABELS[t]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <input
+                type="file"
+                name="file"
+                required
+                accept="image/jpeg,image/png,image/heic,image/heif,application/pdf"
+                capture="environment"
+                className="text-sm text-muted file:mr-3 file:rounded-md file:border-0 file:bg-surface file:px-3 file:py-2 file:text-sm file:text-paper"
+              />
+              <button
+                type="submit"
+                className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-ink transition-opacity hover:opacity-90"
+              >
+                Attach
+              </button>
+            </form>
+          ) : null}
         </section>
 
         {/* Dose history — neutral, chronological; no streaks or guilt (§9). */}

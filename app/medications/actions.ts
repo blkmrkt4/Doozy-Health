@@ -4,7 +4,15 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getActivePatient } from "@/lib/active-patient";
+import {
+  DOCUMENTS_BUCKET,
+  MAX_DOCUMENT_BYTES,
+  extForMime,
+  isAllowedMime,
+  isDocumentType,
+} from "@/lib/documents";
 import {
   DOSE_UNITS,
   FORM_TYPES,
@@ -371,6 +379,109 @@ export async function logDose(formData: FormData) {
   if (error) failDose(medicationId, `Could not log the dose: ${error.message}`);
 
   revalidatePath("/dashboard");
+  revalidatePath(`/medications/${medicationId}`);
+  redirect(`/medications/${medicationId}`);
+}
+
+// ── Photos / documents (PRD §5.1, §13.5) ────────────────────────────────────
+
+/**
+ * Attach a photo/PDF to a medication. Stored in the private bucket under
+ * <patient_id>/<doc_id>.<ext> (the doc_id is the documents row id), with a
+ * documents row linking it. No extraction yet (step 8) — status stays
+ * 'uploaded'. Storage + documents RLS enforce owner/caregiver write.
+ */
+export async function attachMedicationPhoto(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const medicationId = str(formData, "medication_id");
+  const docTypeRaw = str(formData, "document_type") || "vial_photo";
+  const documentType = isDocumentType(docTypeRaw) ? docTypeRaw : "other";
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    failDose(medicationId, "Choose a file to upload.");
+  }
+  if (!isAllowedMime(file.type)) {
+    failDose(medicationId, "Unsupported file type (use JPEG, PNG, HEIC, or PDF).");
+  }
+  if (file.size > MAX_DOCUMENT_BYTES) {
+    failDose(medicationId, "File is larger than the 25 MB limit.");
+  }
+
+  // The medication's patient scopes the storage folder + documents row.
+  const { data: med } = await supabase
+    .from("medications")
+    .select("patient_id")
+    .eq("id", medicationId)
+    .maybeSingle();
+  if (!med) failDose(medicationId, "Medication not found.");
+
+  const role = await roleForPatient(supabase, med.patient_id);
+  if (role !== "owner" && role !== "caregiver") {
+    failDose(medicationId, "You cannot add photos for this medication.");
+  }
+
+  const docId = crypto.randomUUID();
+  const path = `${med.patient_id}/${docId}.${extForMime(file.type)}`;
+
+  const { error: upErr } = await supabase.storage
+    .from(DOCUMENTS_BUCKET)
+    .upload(path, file, { contentType: file.type, upsert: false });
+  if (upErr) failDose(medicationId, `Upload failed: ${upErr.message}`);
+
+  const { error: rowErr } = await supabase.from("documents").insert({
+    id: docId,
+    patient_id: med.patient_id,
+    storage_path: path,
+    file_name: file.name,
+    mime_type: file.type,
+    size_bytes: file.size,
+    document_type: documentType,
+    linked_medication_id: medicationId,
+    uploaded_by: user.id,
+  });
+  if (rowErr) {
+    // Roll back the orphaned object (service-role; storage delete is owner-only).
+    await createAdminClient().storage.from(DOCUMENTS_BUCKET).remove([path]);
+    failDose(medicationId, `Could not save the document: ${rowErr.message}`);
+  }
+
+  revalidatePath(`/medications/${medicationId}`);
+  redirect(`/medications/${medicationId}`);
+}
+
+/** Remove a document (its row, RLS-gated to uploader/owner, then the object). */
+export async function deleteDocument(formData: FormData) {
+  const supabase = await createClient();
+  const medicationId = str(formData, "medication_id");
+  const documentId = str(formData, "document_id");
+
+  // Read the path while it's still visible, then delete the row under RLS
+  // (uploader or owner). If the row delete is denied, nothing is removed.
+  const { data: doc } = await supabase
+    .from("documents")
+    .select("storage_path")
+    .eq("id", documentId)
+    .maybeSingle();
+  if (!doc) failDose(medicationId, "Document not found.");
+
+  const { error, count } = await supabase
+    .from("documents")
+    .delete({ count: "exact" })
+    .eq("id", documentId);
+  if (error) failDose(medicationId, `Could not remove the document: ${error.message}`);
+  if (!count) failDose(medicationId, "You cannot remove this document.");
+
+  // Row gone (authorised) — remove the backing object with the service role.
+  await createAdminClient()
+    .storage.from(DOCUMENTS_BUCKET)
+    .remove([doc.storage_path]);
+
   revalidatePath(`/medications/${medicationId}`);
   redirect(`/medications/${medicationId}`);
 }
