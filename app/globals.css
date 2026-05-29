@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+/*
+ * ByZyB palette (PRD §9): calm, dense, monochrome on black with a single
+ * electric-yellow accent. No celebratory colour, no red "danger" zones.
+ */
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+
+  /* Single accent — ByZyB electric yellow. Used sparingly. */
+  --color-accent: #f4ee35;
+
+  /* Monochrome ramp on black. */
+  --color-ink: #000000; /* page background */
+  --color-paper: #ffffff; /* primary text */
+  --color-muted: #cccccc; /* secondary text */
+  --color-faint: #777777; /* tertiary / de-emphasised */
+  --color-line: #262626; /* hairline borders */
+  --color-surface: #0e0e0e; /* raised panels */
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Tabular figures for dose amounts and times (PRD §9). */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}

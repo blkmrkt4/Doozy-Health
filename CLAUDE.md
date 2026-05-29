@@ -1,0 +1,124 @@
+# CLAUDE.md — Doozy Health
+
+Operating guide for Claude Code on this project. Read this on every session, then read `PRD.md` end to end before answering questions about features, data model, or behaviour. The PRD is the source of truth for **what** to build; this file is **how** to build it and **what not to do**. If they disagree, stop and ask.
+
+When implementing, cite the PRD section in your plan (e.g. "extraction review card per §5.2.1") so drift is easy to spot.
+
+Doozy Health is a **wellness diary tool** for medication tracking — not a medical device, not medical advice. That is a regulatory position, not a tagline (see "Regulatory line" and PRD §6.1).
+
+---
+
+## Stack — non-negotiable without discussion
+
+- **Framework:** Next.js 16 (App Router) + React 19 + TypeScript 6.
+- **Styling:** Tailwind v4. No CSS-in-JS. No component library beyond shadcn/ui if a real need appears.
+- **Database:** Supabase (Postgres) + RLS. **Raw SQL migrations, forward-only. No Prisma, no ORM.** Use `@supabase/supabase-js`.
+- **Auth:** Supabase Auth. **Magic link is the implemented baseline; WebAuthn is intended but not yet built** — don't treat it as done (PRD §6.2).
+- **File storage:** Supabase Storage, private buckets, short-lived signed URLs only.
+- **LLM gateway:** OpenRouter only, via `llmCall`.
+- **PWA:** Installable to iOS/Android. Mobile-first for logging, desktop for review.
+
+Don't introduce alternatives to any of the above without flagging it first.
+
+---
+
+## The hard rules
+
+Never do these without explicit user approval in the chat. If you're about to, stop and ask.
+
+1. **Never call an LLM provider SDK directly.** Every call goes through `llmCall` → OpenRouter. No exceptions, including scripts or tests.
+2. **Never hardcode a model name** outside the admin backend. Models live in `prompt_bindings`.
+3. **Never inline a prompt string.** Prompts live in `prompts` / `prompt_versions`, fetched by slug.
+4. **Never store a secret in the runtime env.** `.env.local` holds only `SECRET_ENCRYPTION_KEY` and the bootstrap OpenRouter key needed to seed `system_secrets`. The running app reads keys from `system_secrets`.
+5. **Never scope patient data with a single "current patient" helper.** Many-to-many via `patient_memberships`; RLS is membership-based; the active patient is session state (see "Scoping").
+6. **Never auto-commit an extraction.** AI-derived data never writes without the user confirming on the review screen, regardless of confidence (PRD §5.2).
+7. **Never advise, diagnose, or adjust a dose** (see "Regulatory line").
+8. **Never compute pharmacokinetics with an LLM.** Curves, superposition, troughs — deterministic TypeScript. LLMs do only fuzzy work (extraction, normalisation, interaction *explanation*, diary suggestion, classification).
+9. **Never let an LLM enumerate drug interactions.** The curated `drug_interactions` table is ground truth; `explain_interaction` only renders a record we already hold.
+10. **Never put `patient_id` or `medication_id` in `extraction_deltas`** (see "ExtractionDelta").
+11. **Never run destructive migrations** (`DROP`, `TRUNCATE`, deleting backfills) without showing them and getting an explicit "yes, run it."
+12. **Never log health values** — medication names, dosages, dose times, photo contents. Scrub them everywhere.
+13. **Never add an npm dependency** without naming it, why, its weight, and the alternative. (Incoming: Twilio, Puppeteer, a charting lib, Web Push/VAPID — still flag each.)
+14. **Never gamify dose-taking** — no streaks, badges, or guilt prompts. It reframes the diary as a behaviour-modification product and crosses the regulatory line.
+
+---
+
+## Regulatory line
+
+Wellness positioning is enforced through language, on every user-facing string and prompt body. The full rules and banned-verb list are in **PRD §6.1** — read them. The essentials:
+
+- No "treat / diagnose / cure / prescribe" in user copy; "medical advice" only in the negation.
+- The PK view is "illustrative / modelled," never "your actual level." We never say "dose now" or "this regimen is better."
+- Interactions inform, never direct: "discuss with your doctor or pharmacist," never "do not take these together."
+- Disclaimer footer on every screen and document (exact wording in §6.1).
+
+If a request would cross this line, surface it and ask before building. Same discipline as Rize's "breath tool" vs "inhaler."
+
+---
+
+## Scoping (the biggest departure from the reference architecture)
+
+The caregiver model makes patient ↔ user many-to-many, so there is **no single scope per user and no `current_*_id()` helper**. Full detail in **PRD §7**. The rule:
+
+- Every patient-owned table has `patient_id`; RLS form: `patient_id IN (SELECT patient_id FROM patient_memberships WHERE user_id = auth.uid())`.
+- The active patient is app session state, never a DB default.
+- Storage keys are `<patient_id>/<doc_id>.<ext>`; the folder check runs against the membership set.
+- `is_private` is enforced in the RLS predicate, not just the UI.
+
+If you reach for a one-household-per-user pattern out of habit, stop — it silently breaks multi-patient access.
+
+---
+
+## LLM rules
+
+The admin backend (PRD §14) holds all the LLM machinery — the most security-sensitive part of the codebase. Full `llmCall` contract in **PRD §14.6**; admin schema in §8. The gotchas that bite:
+
+- Signature: `llmCall(promptSlug: string, vars: Record<string, string>, opts?): Promise<LlmCallResult>`. **`vars` are strings only.**
+- **Images attach via `opts.images`** (base64 data URLs), never through `{{placeholders}}`. The body says "(see attached)."
+- Result is a discriminated union returning **raw `text`** — the **caller parses and validates JSON defensively** (tolerate fences, take first `{`…`}`, validate enums). Never trust model JSON blindly, even with a schema bound.
+- `/admin` is gated by `requireSystemAdmin()` → 404 (not 403) for non-admins. Regular users never see any reference to models, prompts, OpenRouter, or costs.
+- `system_secrets` is app-layer encrypted (`lib/crypto.ts`, `SECRET_ENCRYPTION_KEY`) with **no client RLS** — server actions only. Store `value_encrypted` + `value_masked`; never return the raw value.
+
+New prompt: add a seed row (slug `^[a-z][a-z0-9_]*$`, may ship `disabled` with a placeholder body) + a `prompt_bindings` row, call via `llmCall('slug', {...}, { images })`, tell the admin to tune the binding after deploy. Never add a "quick path" that skips the service — add a prompt instead.
+
+---
+
+## ExtractionDelta
+
+On every confirmation, write one `extraction_deltas` row per diverging field. Full spec in **PRD §5.2.3**. The invariant that matters here: **no `patient_id`, no `medication_id`** — keep `drug_canonical_name` for grouping and a `document_id` for source review, nothing that identifies the person. Admin "view source" renders the photo with identifying metadata redacted server-side and logs to `admin_audit_log`.
+
+---
+
+## Conventions
+
+- **TypeScript everywhere.** No `.js` in the app (config excepted). `any` is a code smell; flag it when forced.
+- **British English** in comments, UI copy, and prompt bodies (categorise, normalise, colour).
+- **App Router:** server components by default, `'use client'` only when needed, server actions for admin mutations, route handlers in `app/api/`.
+- **Naming:** kebab-case files, PascalCase components, camelCase functions/vars, **snake_case DB columns** — `patient_id` not `patientId` in DB references.
+- **Imports:** absolute from `@/`, never deep relative.
+- **Errors:** typed, small error-class hierarchy; not `throw new Error("string")` for catchable cases.
+- **Comments:** explain *why*, not *what*.
+- **DB:** patient tables snake_case plural with the membership RLS predicate; admin tables global, gated by `is_current_system_admin()`. **Dose amounts and concentrations are `numeric`, never float.** `date` for calendar dates, `timestamptz` for instants. `created_at` on every table, `updated_at` + `set_updated_at()` trigger on mutable ones. Migrations forward-only — never edit an applied one.
+- **UI:** mobile-first; calm, dense, monochrome with a single accent (ByZyB electric yellow `#F4EE35` on black); no animations or confetti on a logged dose; tabular figures, right-aligned numbers; the syringe visual calibrated to the user's actual spec; the half-life view never alarmist (no red zones, no "dose now"); staleness neutral ("last logged 4 days ago"); privacy-mode blur as global state; a patient switcher when a user has more than one patient.
+
+---
+
+## Testing
+
+Test requirements are specified in **PRD §15**. The non-negotiables: no tests against live OpenRouter ever (mock at the `callOpenRouter` boundary); cover the `llmCall` fallback chain, the pharmacokinetic engine, the defensive extraction parser, the membership RLS predicate + `is_private` override, the `extraction_deltas` no-identifier invariant, and the "extraction is never auto-committed" integration path.
+
+---
+
+## When to stop and ask
+
+Before: changing `PRD.md`; adding a dependency; changing the data model on existing tables; adding a route under `/admin`; touching encryption, RLS, or auth; talking to OpenRouter outside `llmCall`; writing user-facing copy that could read as advice or an instruction to dose; adding app-layer encryption to health data (net-new, not assumed); or building/reordering anything outside the §13 build sequence. Draft a plan, paste the relevant PRD section, wait for "go."
+
+---
+
+## Build sequence
+
+Follow **PRD §13** step by step; don't jump ahead. Auth + the membership scoping foundation come first; manual entry before AI; the admin backend foundation before the first real LLM call; delta logging lands with the first extraction. Each step lands green (deploys, no broken tests) before the next. When a step is done, summarise what changed, link the PRD section, and ask whether to proceed.
+
+---
+
+*Keep this file short and opinionated. Detail belongs in the PRD; this file points to it.*
