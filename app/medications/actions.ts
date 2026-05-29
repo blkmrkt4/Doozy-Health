@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { getActivePatient } from "@/lib/active-patient";
 import {
@@ -221,4 +222,169 @@ export async function archiveMedication(formData: FormData) {
   }
   revalidatePath("/dashboard");
   redirect("/dashboard");
+}
+
+// ── Dose logging (PRD §5.4, §4.3) ───────────────────────────────────────────
+
+/**
+ * The caller's role on a patient, used to set dose_logs.source: a caregiver's
+ * log is tagged 'caregiver', an owner's manual log 'manual' (PRD §8). Returns
+ * null if the caller holds no membership (RLS scopes the lookup to own rows).
+ */
+async function roleForPatient(
+  supabase: SupabaseClient,
+  patientId: string
+): Promise<"owner" | "caregiver" | "viewer" | null> {
+  const { data } = await supabase
+    .from("patient_memberships")
+    .select("role")
+    .eq("patient_id", patientId)
+    .maybeSingle();
+  return (data?.role as "owner" | "caregiver" | "viewer") ?? null;
+}
+
+function failDose(medicationId: string, message: string): never {
+  redirect(
+    `/medications/${medicationId}?error=${encodeURIComponent(message)}`
+  );
+}
+
+/**
+ * One-tap log of the scheduled dose at the current time (the < 10s path,
+ * §4.3). Amount/unit/route come from the active chosen regimen.
+ */
+export async function logScheduledDose(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const medicationId = str(formData, "medication_id");
+  const returnTo = str(formData, "return_to") || "/dashboard";
+
+  const { data: chosen } = await supabase
+    .from("chosen_regimens")
+    .select("patient_id, dose_amount, dose_unit, route")
+    .eq("medication_id", medicationId)
+    .eq("active", true)
+    .maybeSingle();
+  if (!chosen) failDose(medicationId, "No active regimen to log.");
+
+  const role = await roleForPatient(supabase, chosen.patient_id);
+  if (role !== "owner" && role !== "caregiver") {
+    failDose(medicationId, "You cannot log doses for this medication.");
+  }
+
+  const { error } = await supabase.from("dose_logs").insert({
+    medication_id: medicationId,
+    patient_id: chosen.patient_id,
+    event_type: "taken",
+    amount: chosen.dose_amount, // numeric-as-string; preserves precision
+    unit: chosen.dose_unit,
+    route_taken: chosen.route,
+    source: role === "caregiver" ? "caregiver" : "manual",
+    logged_by_user_id: user.id,
+  });
+  if (error) failDose(medicationId, `Could not log the dose: ${error.message}`);
+
+  revalidatePath("/dashboard");
+  revalidatePath(`/medications/${medicationId}`);
+  redirect(returnTo);
+}
+
+/**
+ * Custom log: a different amount/time, an injection site/note, an as-needed
+ * (PRN) dose, or a skip with a reason (§5.4).
+ */
+export async function logDose(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const medicationId = str(formData, "medication_id");
+  const eventType = str(formData, "event_type");
+  if (!["taken", "prn", "skipped"].includes(eventType)) {
+    failDose(medicationId, "Choose what to log.");
+  }
+
+  // Resolve the patient + role from the medication (RLS-scoped).
+  const { data: med } = await supabase
+    .from("medications")
+    .select("patient_id")
+    .eq("id", medicationId)
+    .maybeSingle();
+  if (!med) failDose(medicationId, "Medication not found.");
+  const role = await roleForPatient(supabase, med.patient_id);
+  if (role !== "owner" && role !== "caregiver") {
+    failDose(medicationId, "You cannot log doses for this medication.");
+  }
+
+  // When-logged: a tz-less datetime-local value, or now if blank.
+  const whenRaw = str(formData, "logged_at");
+  let loggedAt: string | undefined;
+  if (whenRaw) {
+    const d = new Date(whenRaw);
+    if (Number.isNaN(d.getTime())) failDose(medicationId, "Invalid time.");
+    loggedAt = d.toISOString();
+  }
+
+  const source = role === "caregiver" ? "caregiver" : "manual";
+  const note = str(formData, "note") || null;
+  const site = str(formData, "site") || null;
+
+  const row: Record<string, unknown> = {
+    medication_id: medicationId,
+    patient_id: med.patient_id,
+    event_type: eventType,
+    source,
+    logged_by_user_id: user.id,
+    site,
+    note,
+  };
+  if (loggedAt) row.logged_at = loggedAt;
+
+  if (eventType === "skipped") {
+    // A skip carries a reason but no amount/unit (the CHECK enforces this).
+    row.note = str(formData, "skip_reason") || note;
+    row.amount = null;
+    row.unit = null;
+  } else {
+    const amountRaw = str(formData, "amount");
+    const amount = Number(amountRaw);
+    if (!amountRaw || !Number.isFinite(amount) || amount <= 0) {
+      failDose(medicationId, "Enter a dose amount greater than zero.");
+    }
+    const unit = inSet(str(formData, "unit"), DOSE_UNITS);
+    if (!unit) failDose(medicationId, "Choose a valid unit.");
+    const routeRaw = str(formData, "route_taken");
+    const route = routeRaw ? inSet(routeRaw, ROUTES) : null;
+    if (routeRaw && !route) failDose(medicationId, "Choose a valid route.");
+    row.amount = amountRaw; // preserve precision (numeric-as-string)
+    row.unit = unit;
+    row.route_taken = route;
+  }
+
+  const { error } = await supabase.from("dose_logs").insert(row);
+  if (error) failDose(medicationId, `Could not log the dose: ${error.message}`);
+
+  revalidatePath("/dashboard");
+  revalidatePath(`/medications/${medicationId}`);
+  redirect(`/medications/${medicationId}`);
+}
+
+/** Undo a logged dose (the logger or an owner, enforced by RLS). */
+export async function deleteDoseLog(formData: FormData) {
+  const supabase = await createClient();
+  const medicationId = str(formData, "medication_id");
+  const logId = str(formData, "log_id");
+
+  const { error } = await supabase.from("dose_logs").delete().eq("id", logId);
+  if (error) failDose(medicationId, `Could not remove the log: ${error.message}`);
+
+  revalidatePath("/dashboard");
+  revalidatePath(`/medications/${medicationId}`);
+  redirect(`/medications/${medicationId}`);
 }

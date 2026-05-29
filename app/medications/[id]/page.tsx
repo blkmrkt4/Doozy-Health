@@ -5,9 +5,20 @@ import {
   formatDose,
   formatFrequency,
   formatRoute,
+  relativeAge,
 } from "@/lib/format";
-import { FORM_TYPE_LABELS, type FormType } from "@/lib/types";
-import { archiveMedication, setMedicationPrivacy } from "@/app/medications/actions";
+import {
+  FORM_TYPE_LABELS,
+  INJECTABLE_FORM_TYPES,
+  type FormType,
+} from "@/lib/types";
+import {
+  archiveMedication,
+  deleteDoseLog,
+  logScheduledDose,
+  setMedicationPrivacy,
+} from "@/app/medications/actions";
+import { LogDoseForm } from "./log-dose-form";
 
 type Regimen = {
   dose_amount: string;
@@ -91,13 +102,15 @@ export default async function MedicationDetailPage({
   if (!data) notFound();
   const med = data as Medication;
 
-  // Owner controls require the owner role on THIS medication's patient.
+  // Owner controls require the owner role on THIS medication's patient;
+  // owners and caregivers can log doses (PRD §5.6).
   const { data: membership } = await supabase
     .from("patient_memberships")
     .select("role")
     .eq("patient_id", med.patient_id)
     .maybeSingle();
   const isOwner = membership?.role === "owner";
+  const canLog = isOwner || membership?.role === "caregiver";
 
   const prescribed = byNewest(med.prescribed_regimens)[0] ?? null;
   const delivery = byNewest(med.delivery_forms)[0] ?? null;
@@ -105,6 +118,19 @@ export default async function MedicationDetailPage({
     (med.chosen_regimens ?? []).find((c) => c.active) ??
     byNewest(med.chosen_regimens)[0] ??
     null;
+
+  const isInjectable = delivery
+    ? INJECTABLE_FORM_TYPES.has(delivery.form_type as FormType)
+    : false;
+
+  // Recent dose history (RLS-scoped to this medication's visibility).
+  const { data: logData } = await supabase
+    .from("dose_logs")
+    .select("id, event_type, logged_at, amount, unit, route_taken, site, note, source")
+    .eq("medication_id", med.id)
+    .order("logged_at", { ascending: false })
+    .limit(50);
+  const logs = logData ?? [];
 
   return (
     <div className="min-h-full">
@@ -135,6 +161,30 @@ export default async function MedicationDetailPage({
           <p className="rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">
             {errorParam}
           </p>
+        ) : null}
+
+        {/* Log a dose — the primary action. One tap for the scheduled dose;
+            "Log differently" expands the custom/PRN/skip path (§4.3, §5.4). */}
+        {canLog && chosen ? (
+          <section className="flex flex-wrap items-center gap-3 rounded-md border border-line p-4">
+            <form action={logScheduledDose}>
+              <input type="hidden" name="medication_id" value={med.id} />
+              <input type="hidden" name="return_to" value={`/medications/${med.id}`} />
+              <button
+                type="submit"
+                className="rounded-md bg-accent px-5 py-2.5 text-sm font-medium text-ink transition-opacity hover:opacity-90"
+              >
+                Taken now
+              </button>
+            </form>
+            <LogDoseForm
+              medicationId={med.id}
+              defaultAmount={String(chosen.dose_amount)}
+              defaultUnit={chosen.dose_unit}
+              defaultRoute={chosen.route}
+              isInjectable={isInjectable}
+            />
+          </section>
         ) : null}
 
         {/* Chosen regimen — the layer that drives schedule + timeline. Shown
@@ -221,6 +271,62 @@ export default async function MedicationDetailPage({
             </div>
           ) : (
             <p className="mt-2 text-sm text-faint">Not set.</p>
+          )}
+        </section>
+
+        {/* Dose history — neutral, chronological; no streaks or guilt (§9). */}
+        <section className="rounded-md border border-line p-4">
+          <h2 className="text-sm font-medium text-paper">History</h2>
+          {logs.length === 0 ? (
+            <p className="mt-2 text-sm text-faint">No doses logged yet.</p>
+          ) : (
+            <ul className="mt-2 divide-y divide-line">
+              {logs.map((l) => (
+                <li
+                  key={l.id}
+                  className="flex items-baseline justify-between gap-4 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm text-paper">
+                      {l.event_type === "skipped" ? (
+                        <span className="text-faint">Skipped</span>
+                      ) : (
+                        <span className="tabular">
+                          {formatDose(l.amount as string, l.unit as string)}
+                          {l.event_type === "prn" ? (
+                            <span className="ml-2 text-xs text-faint">PRN</span>
+                          ) : null}
+                        </span>
+                      )}
+                      {l.route_taken ? (
+                        <span className="ml-2 text-xs text-faint">
+                          {formatRoute(l.route_taken)}
+                        </span>
+                      ) : null}
+                    </p>
+                    <p className="mt-0.5 text-xs text-faint">
+                      {relativeAge(l.logged_at as string)}
+                      {l.site ? ` · ${l.site}` : ""}
+                      {l.source === "caregiver" ? " · by caregiver" : ""}
+                      {l.note ? ` · ${l.note}` : ""}
+                    </p>
+                  </div>
+                  {canLog ? (
+                    <form action={deleteDoseLog} className="shrink-0">
+                      <input type="hidden" name="medication_id" value={med.id} />
+                      <input type="hidden" name="log_id" value={l.id as string} />
+                      <button
+                        type="submit"
+                        className="text-xs text-faint underline transition-colors hover:text-muted"
+                        title="Undo this log"
+                      >
+                        undo
+                      </button>
+                    </form>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
           )}
         </section>
 

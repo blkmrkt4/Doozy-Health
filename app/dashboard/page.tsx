@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getActivePatient } from "@/lib/active-patient";
 import { signOut } from "@/app/login/actions";
-import { formatRegimenSummary } from "@/lib/format";
+import { logScheduledDose } from "@/app/medications/actions";
+import { formatRegimenSummary, relativeAge } from "@/lib/format";
 
 type ChosenRow = {
   dose_amount: string;
@@ -49,6 +50,22 @@ export default async function DashboardPage() {
 
   const medications = (data ?? []) as MedicationRow[];
   const isOwner = activePatient?.role === "owner";
+  // Owners and caregivers can log doses (PRD §5.6); viewers cannot.
+  const canLog =
+    activePatient?.role === "owner" || activePatient?.role === "caregiver";
+
+  // Latest log per medication, for the neutral "last logged" line (PRD §9).
+  // RLS scopes these to medications the caller may read.
+  const { data: logRows } = await supabase
+    .from("dose_logs")
+    .select("medication_id, logged_at")
+    .order("logged_at", { ascending: false });
+  const lastLogged = new Map<string, string>();
+  for (const r of logRows ?? []) {
+    if (!lastLogged.has(r.medication_id)) {
+      lastLogged.set(r.medication_id, r.logged_at);
+    }
+  }
 
   return (
     <div className="min-h-full">
@@ -107,38 +124,48 @@ export default async function DashboardPage() {
           <ul className="mt-6 divide-y divide-line overflow-hidden rounded-md border border-line">
             {medications.map((m) => {
               const chosen = (m.chosen_regimens ?? []).find((c) => c.active);
+              const last = lastLogged.get(m.id);
               return (
-                <li key={m.id}>
+                <li
+                  key={m.id}
+                  className="flex items-center justify-between gap-4 px-4 py-4"
+                >
                   <Link
                     href={`/medications/${m.id}`}
-                    className="flex items-baseline justify-between gap-4 px-4 py-4 transition-colors hover:bg-surface"
+                    className="min-w-0 flex-1 transition-colors hover:opacity-80"
                   >
-                    <div className="min-w-0">
-                      <p className="truncate text-base font-medium text-paper">
-                        {m.display_name}
-                        {m.is_private ? (
-                          <span
-                            className="ml-2 align-middle text-xs text-faint"
-                            title="Private"
-                          >
-                            🔒
-                          </span>
-                        ) : null}
+                    <p className="truncate text-base font-medium text-paper">
+                      {m.display_name}
+                      {m.is_private ? (
+                        <span
+                          className="ml-2 align-middle text-xs text-faint"
+                          title="Private"
+                        >
+                          🔒
+                        </span>
+                      ) : null}
+                    </p>
+                    {chosen ? (
+                      <p className="mt-0.5 tabular text-sm text-muted">
+                        {formatRegimenSummary(chosen)}
                       </p>
-                      <p className="mt-0.5 text-xs text-faint">
-                        {m.entry_source === "manual" ? "Entered manually" : "From a photo"}
-                      </p>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      {chosen ? (
-                        <p className="tabular text-sm text-muted">
-                          {formatRegimenSummary(chosen)}
-                        </p>
-                      ) : (
-                        <p className="text-sm text-faint">—</p>
-                      )}
-                    </div>
+                    ) : null}
+                    <p className="mt-0.5 text-xs text-faint">
+                      {last ? `Last logged ${relativeAge(last)}` : "No doses logged yet"}
+                    </p>
                   </Link>
+                  {canLog && chosen ? (
+                    <form action={logScheduledDose} className="shrink-0">
+                      <input type="hidden" name="medication_id" value={m.id} />
+                      <input type="hidden" name="return_to" value="/dashboard" />
+                      <button
+                        type="submit"
+                        className="rounded-md bg-accent px-5 py-2.5 text-sm font-medium text-ink transition-opacity hover:opacity-90"
+                      >
+                        Taken
+                      </button>
+                    </form>
+                  ) : null}
                 </li>
               );
             })}
