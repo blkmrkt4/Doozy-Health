@@ -134,3 +134,39 @@ export function isFrequency(v: unknown): v is Frequency {
   }
   return false;
 }
+
+// ── Admin / LLM infrastructure (PRD §14) ───────────────────────────────────
+export const PROMPT_PURPOSES = [
+  "extraction",
+  "classification",
+  "summary",
+  "other",
+] as const;
+export type PromptPurpose = (typeof PROMPT_PURPOSES)[number];
+
+export const PROMPT_STATUSES = ["active", "disabled"] as const;
+export type PromptStatus = (typeof PROMPT_STATUSES)[number];
+
+export const RESPONSE_FORMATS = ["text", "json"] as const;
+export type ResponseFormat = (typeof RESPONSE_FORMATS)[number];
+
+export const DELTA_DIRECTIONS = ["llm_to_user", "user_to_llm"] as const;
+export type DeltaDirection = (typeof DELTA_DIRECTIONS)[number];
+
+export const LLM_CONFIDENCES = ["high", "medium", "low"] as const;
+export type LlmConfidence = (typeof LLM_CONFIDENCES)[number];
+
+export const ADMIN_ANNOTATIONS = [
+  "unreviewed",
+  "expected",
+  "extraction_miss",
+] as const;
+export type AdminAnnotation = (typeof ADMIN_ANNOTATIONS)[number];
+
+export const AUDIT_ACTIONS = [
+  "create",
+  "update",
+  "delete",
+  "view_source",
+] as const;
+export type AuditAction = (typeof AUDIT_ACTIONS)[number];

@@ -9,6 +9,7 @@ import { getActivePatient } from "@/lib/active-patient";
 import {
   DOCUMENTS_BUCKET,
   MAX_DOCUMENT_BYTES,
+  SIGNED_URL_TTL_SECONDS,
   extForMime,
   isAllowedMime,
   isDocumentType,
@@ -25,6 +26,11 @@ import {
   type Route,
   type SyringeSpec,
 } from "@/lib/types";
+import {
+  extractVial,
+  writeExtractionDeltas,
+  type VialExtraction,
+} from "@/lib/extraction";
 
 function failNew(message: string): never {
   redirect(`/medications/new?error=${encodeURIComponent(message)}`);
@@ -498,4 +504,287 @@ export async function deleteDoseLog(formData: FormData) {
   revalidatePath("/dashboard");
   revalidatePath(`/medications/${medicationId}`);
   redirect(`/medications/${medicationId}`);
+}
+
+// ── AI extraction — vials (PRD §5.2, §13.8) ───────────────────────────────
+
+function failExtract(message: string): never {
+  redirect(`/medications/new?error=${encodeURIComponent(message)}`);
+}
+
+/**
+ * Upload a photo and run extract_vial. Stores the document, runs the
+ * extraction, and redirects to the review page. Does NOT write to the
+ * medication tables (hard rule #6 — never auto-commit an extraction).
+ */
+export async function uploadAndExtract(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const active = await getActivePatient(supabase);
+  if (!active) failExtract("No active patient.");
+  if (active.role !== "owner") failExtract("Only the patient owner can add a medication.");
+
+  const file = formData.get("photo");
+  if (!(file instanceof File) || file.size === 0) {
+    failExtract("Choose a photo to scan.");
+  }
+  if (!isAllowedMime(file.type) || file.type === "application/pdf") {
+    failExtract("Please use an image file (JPEG, PNG, or HEIC).");
+  }
+  if (file.size > MAX_DOCUMENT_BYTES) {
+    failExtract("File is larger than the 25 MB limit.");
+  }
+
+  // Upload the document.
+  const docId = crypto.randomUUID();
+  const path = `${active.id}/${docId}.${extForMime(file.type)}`;
+
+  const { error: upErr } = await supabase.storage
+    .from(DOCUMENTS_BUCKET)
+    .upload(path, file, { contentType: file.type, upsert: false });
+  if (upErr) failExtract(`Upload failed: ${upErr.message}`);
+
+  const { error: rowErr } = await supabase.from("documents").insert({
+    id: docId,
+    patient_id: active.id,
+    storage_path: path,
+    file_name: file.name,
+    mime_type: file.type,
+    size_bytes: file.size,
+    document_type: "vial_photo",
+    uploaded_by: user.id,
+  });
+  if (rowErr) {
+    await createAdminClient().storage.from(DOCUMENTS_BUCKET).remove([path]);
+    failExtract(`Could not save the document: ${rowErr.message}`);
+  }
+
+  // Convert to base64 data URL for the LLM.
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const base64 = `data:${file.type};base64,${buffer.toString("base64")}`;
+
+  // Gather existing medication names for context.
+  const { data: meds } = await supabase
+    .from("medications")
+    .select("display_name")
+    .eq("patient_id", active.id)
+    .eq("archived", false);
+  const medNames = (meds ?? []).map((m) => m.display_name as string).join(", ");
+
+  const result = await extractVial(docId, base64, medNames, "metric");
+
+  if (!result.ok) {
+    redirect(
+      `/medications/new?error=${encodeURIComponent(`Extraction failed: ${result.error}`)}`
+    );
+  }
+
+  // Redirect to the review page with the document ID.
+  redirect(`/medications/new/extract?doc=${docId}`);
+}
+
+/**
+ * Confirm an extraction: create the medication from the user-edited fields
+ * and write extraction_deltas for any changed values (PRD §5.2.3).
+ */
+export async function confirmPhotoExtraction(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const active = await getActivePatient(supabase);
+  if (!active) failNew("No active patient.");
+  if (active.role !== "owner") failNew("Only the patient owner can add a medication.");
+
+  const docId = str(formData, "document_id");
+  if (!docId) failNew("Missing document reference.");
+
+  const admin = createAdminClient();
+
+  // Load the extraction from the document.
+  const { data: doc } = await admin
+    .from("documents")
+    .select("extracted_json, storage_path")
+    .eq("id", docId)
+    .single();
+  if (!doc?.extracted_json) failNew("No extraction found for this document.");
+
+  const extraction = doc.extracted_json as unknown as VialExtraction;
+
+  // Read user-confirmed values from the form.
+  const displayName = str(formData, "drug_name");
+  if (!displayName) failNew("Enter the medication name.");
+
+  const doseAmount = Number(str(formData, "dose_amount"));
+  if (!Number.isFinite(doseAmount) || doseAmount <= 0) {
+    failNew("Enter a valid dose amount.");
+  }
+  const doseUnit = inSet(str(formData, "dose_unit"), DOSE_UNITS);
+  if (!doseUnit) failNew("Choose a valid dose unit.");
+  const route = inSet(str(formData, "route"), ROUTES);
+  if (!route) failNew("Choose a valid route.");
+  const formType = inSet(str(formData, "form_type"), FORM_TYPES) ?? "vial";
+
+  // Build optional concentration.
+  let concentration: Concentration | undefined;
+  const concAmount = Number(str(formData, "concentration_amount"));
+  if (Number.isFinite(concAmount) && concAmount > 0) {
+    const concUnit = inSet(str(formData, "concentration_unit"), DOSE_UNITS) ?? "mg";
+    const perVolume = Number(str(formData, "concentration_per_volume") || "1");
+    concentration = {
+      amount: concAmount,
+      unit: concUnit,
+      per_volume: Number.isFinite(perVolume) && perVolume > 0 ? perVolume : 1,
+      volume_unit: "mL",
+    };
+  }
+
+  // Create medication via the RPC (same as manual creation).
+  const frequency: Frequency = { type: "as_needed" }; // default for photo path
+  const { data: medId, error: medErr } = await supabase.rpc(
+    "create_manual_medication",
+    {
+      p_patient_id: active.id,
+      p_display_name: displayName,
+      p_is_private: false,
+      p_prescribed: {
+        dose_amount: doseAmount,
+        dose_unit: doseUnit,
+        route,
+        frequency,
+      },
+      p_delivery: {
+        form_type: formType,
+        ...(concentration ? { concentration } : {}),
+        expiry_date: str(formData, "expiry_date"),
+        batch: str(formData, "batch"),
+        manufacturer: str(formData, "manufacturer"),
+      },
+      p_chosen: {
+        dose_amount: doseAmount,
+        dose_unit: doseUnit,
+        route,
+        frequency,
+      },
+    }
+  );
+
+  if (medErr) failNew(`Could not save the medication: ${medErr.message}`);
+
+  // Link the document to the medication.
+  await admin
+    .from("documents")
+    .update({ linked_medication_id: medId })
+    .eq("id", docId);
+
+  // Gather user-confirmed values for delta comparison.
+  const userValues: Record<string, string> = {
+    drug_name_raw: displayName,
+    drug_name_canonical: displayName,
+    strength: str(formData, "strength"),
+    concentration_amount: str(formData, "concentration_amount"),
+    concentration_unit: str(formData, "concentration_unit"),
+    concentration_per_volume: str(formData, "concentration_per_volume"),
+    volume_ml: str(formData, "volume_ml"),
+    route: str(formData, "route"),
+    expiry_date: str(formData, "expiry_date"),
+    batch: str(formData, "batch"),
+    manufacturer: str(formData, "manufacturer"),
+  };
+
+  // Load prompt version ID and model used from the extraction metadata.
+  const { data: prompt } = await admin
+    .from("prompts")
+    .select("current_version_id")
+    .eq("slug", "extract_vial")
+    .single();
+
+  // Look up model used from the most recent llm_call_log for this prompt.
+  const { data: lastLog } = await admin
+    .from("llm_call_logs")
+    .select("model_used")
+    .eq("prompt_slug", "extract_vial")
+    .eq("success", true)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single();
+
+  await writeExtractionDeltas({
+    documentId: docId,
+    drugCanonicalName: displayName,
+    extraction,
+    userValues,
+    direction: "llm_to_user",
+    promptSlug: "extract_vial",
+    promptVersionId: (prompt?.current_version_id as string) ?? "",
+    modelUsed: (lastLog?.model_used as string) ?? "unknown",
+  });
+
+  revalidatePath("/dashboard");
+  redirect(`/medications/${medId as string}`);
+}
+
+/**
+ * Run AI extraction on an existing document attached to a medication
+ * (manual-first verification path, PRD §5.2.2).
+ */
+export async function runVerification(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const medicationId = str(formData, "medication_id");
+  const documentId = str(formData, "document_id");
+
+  if (!medicationId || !documentId) {
+    failDose(medicationId, "Missing medication or document reference.");
+  }
+
+  // Load the document's storage path and generate a signed URL.
+  const { data: doc } = await supabase
+    .from("documents")
+    .select("storage_path, mime_type")
+    .eq("id", documentId)
+    .single();
+  if (!doc) failDose(medicationId, "Document not found.");
+
+  // Download the image to base64 for the LLM.
+  const { data: blob } = await supabase.storage
+    .from(DOCUMENTS_BUCKET)
+    .download(doc.storage_path);
+  if (!blob) failDose(medicationId, "Could not download the photo.");
+
+  const buffer = Buffer.from(await blob.arrayBuffer());
+  const base64 = `data:${doc.mime_type};base64,${buffer.toString("base64")}`;
+
+  // Gather existing medication names for context.
+  const { data: med } = await supabase
+    .from("medications")
+    .select("patient_id")
+    .eq("id", medicationId)
+    .single();
+  if (!med) failDose(medicationId, "Medication not found.");
+
+  const { data: meds } = await supabase
+    .from("medications")
+    .select("display_name")
+    .eq("patient_id", med.patient_id)
+    .eq("archived", false);
+  const medNames = (meds ?? []).map((m) => m.display_name as string).join(", ");
+
+  const result = await extractVial(documentId, base64, medNames, "metric");
+
+  if (!result.ok) {
+    failDose(medicationId, `Extraction failed: ${result.error}`);
+  }
+
+  redirect(`/medications/${medicationId}/verify?doc=${documentId}`);
 }

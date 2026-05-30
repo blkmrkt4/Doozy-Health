@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "sync:drugs": "vite-node scripts/sync-drugs.ts"
+    "sync:drugs": "vite-node scripts/sync-drugs.ts",
+    "sync:models": "vite-node scripts/sync-models.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.3",

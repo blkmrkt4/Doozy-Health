@@ -5,9 +5,17 @@ import { fileURLToPath } from "node:url";
 // mirrors tsconfig's "@/*" -> "./*" so both resolve absolute @/ imports.
 const root = fileURLToPath(new URL(".", import.meta.url));
 
+// Stub server-only in tests — it throws at import time in non-Next.js envs.
+const serverOnlyStub = fileURLToPath(
+  new URL("test/stubs/server-only.ts", import.meta.url)
+);
+
 export default defineConfig({
   resolve: {
-    alias: { "@": root.replace(/\/$/, "") },
+    alias: {
+      "@": root.replace(/\/$/, ""),
+      "server-only": serverOnlyStub,
+    },
   },
   test: {
     environment: "node",

@@ -18,6 +18,7 @@ import {
   deleteDocument,
   deleteDoseLog,
   logScheduledDose,
+  runVerification,
   setMedicationPrivacy,
 } from "@/app/medications/actions";
 import {
@@ -144,7 +145,7 @@ export default async function MedicationDetailPage({
   // rows; the signed URLs respect storage RLS (is_private-aware).
   const { data: docData } = await supabase
     .from("documents")
-    .select("id, storage_path, file_name, mime_type, document_type, uploaded_at")
+    .select("id, storage_path, file_name, mime_type, document_type, status, uploaded_at")
     .eq("linked_medication_id", med.id)
     .order("uploaded_at", { ascending: false });
   const docs = docData ?? [];
@@ -335,18 +336,36 @@ export default async function MedicationDetailPage({
                         </span>
                       )}
                     </a>
-                    {canLog ? (
-                      <form action={deleteDocument} className="mt-1 text-center">
-                        <input type="hidden" name="medication_id" value={med.id} />
-                        <input type="hidden" name="document_id" value={d.id} />
-                        <button
-                          type="submit"
-                          className="text-xs text-faint underline hover:text-muted"
-                        >
-                          remove
-                        </button>
-                      </form>
-                    ) : null}
+                    <div className="mt-1 flex justify-center gap-2">
+                      {/* Verify with AI (PRD §5.2.2) — for image docs that
+                          haven't been extracted yet. */}
+                      {canLog &&
+                        d.mime_type.startsWith("image/") &&
+                        d.status === "uploaded" ? (
+                        <form action={runVerification}>
+                          <input type="hidden" name="medication_id" value={med.id} />
+                          <input type="hidden" name="document_id" value={d.id} />
+                          <button
+                            type="submit"
+                            className="text-xs text-accent underline hover:opacity-80"
+                          >
+                            verify
+                          </button>
+                        </form>
+                      ) : null}
+                      {canLog ? (
+                        <form action={deleteDocument}>
+                          <input type="hidden" name="medication_id" value={med.id} />
+                          <input type="hidden" name="document_id" value={d.id} />
+                          <button
+                            type="submit"
+                            className="text-xs text-faint underline hover:text-muted"
+                          >
+                            remove
+                          </button>
+                        </form>
+                      ) : null}
+                    </div>
                   </li>
                 );
               })}

@@ -26,5 +26,9 @@ export function serverEnv() {
       "SUPABASE_SERVICE_ROLE_KEY",
       process.env.SUPABASE_SERVICE_ROLE_KEY
     ),
+    secretEncryptionKey: required(
+      "SECRET_ENCRYPTION_KEY",
+      process.env.SECRET_ENCRYPTION_KEY
+    ),
   };
 }
