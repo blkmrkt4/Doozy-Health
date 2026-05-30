@@ -59,6 +59,24 @@ export default async function SettingsPage() {
               </Link>
             </>
           ) : null}
+          <Link
+            href="/settings/export"
+            className="block rounded-md border border-line p-4 hover:border-muted"
+          >
+            <h2 className="text-sm font-medium text-paper">Export data</h2>
+            <p className="mt-1 text-xs text-faint">
+              Download your data or generate a PDF report for your clinician.
+            </p>
+          </Link>
+          <Link
+            href="/settings/account"
+            className="block rounded-md border border-line p-4 hover:border-muted"
+          >
+            <h2 className="text-sm font-medium text-paper">Account</h2>
+            <p className="mt-1 text-xs text-faint">
+              Manage your account or request deletion.
+            </p>
+          </Link>
         </div>
       </main>
     </div>

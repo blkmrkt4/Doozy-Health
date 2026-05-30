@@ -391,3 +391,49 @@ export async function writeExtractionDeltas(opts: {
     await admin.from("extraction_deltas").insert(rows);
   }
 }
+
+// ── Per-user correction signal (§5.2.3) ────────────────────────────────────
+
+/**
+ * Record per-user extraction corrections. When a user repeatedly edits the
+ * same field for the same drug, the correction count grows, improving future
+ * extractions for that user. Patient-scoped — does not flow into the
+ * system-wide extraction_deltas table.
+ */
+export async function writeUserCorrections(opts: {
+  patientId: string;
+  drugCanonicalName: string;
+  corrections: Record<string, string>; // field_name → corrected_to
+}): Promise<void> {
+  const admin = createAdminClient();
+
+  for (const [fieldName, correctedTo] of Object.entries(opts.corrections)) {
+    if (!correctedTo) continue;
+
+    // Upsert: increment correction_count if the same field+drug already exists.
+    const { data: existing } = await admin
+      .from("user_extraction_corrections")
+      .select("id, correction_count")
+      .eq("patient_id", opts.patientId)
+      .eq("drug_canonical_name", opts.drugCanonicalName)
+      .eq("field_name", fieldName)
+      .maybeSingle();
+
+    if (existing) {
+      await admin
+        .from("user_extraction_corrections")
+        .update({
+          corrected_to: correctedTo,
+          correction_count: (existing.correction_count as number) + 1,
+        })
+        .eq("id", existing.id);
+    } else {
+      await admin.from("user_extraction_corrections").insert({
+        patient_id: opts.patientId,
+        drug_canonical_name: opts.drugCanonicalName,
+        field_name: fieldName,
+        corrected_to: correctedTo,
+      });
+    }
+  }
+}
