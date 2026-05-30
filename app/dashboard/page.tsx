@@ -184,6 +184,9 @@ export default async function DashboardPage() {
             <Link href="/diary" className="text-faint hover:text-muted">
               Diary
             </Link>
+            <Link href="/report" className="text-faint hover:text-muted">
+              Export
+            </Link>
             <Link href="/settings" className="text-faint hover:text-muted">
               Settings
             </Link>

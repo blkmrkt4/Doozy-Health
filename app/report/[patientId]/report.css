@@ -1,0 +1,145 @@
+/* Print-optimised report styles (PRD §5.10). ByZyB palette: black bg,
+   electric yellow accents, white body type. Used by Puppeteer PDF render
+   and browser @media print. */
+
+.report {
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  color: #ffffff;
+  background: #000000;
+  padding: 2rem;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* ── Cover ───────────────────────────────────────────────────────────── */
+
+.report-cover {
+  text-align: center;
+  padding: 4rem 0;
+  border-bottom: 1px solid #262626;
+  margin-bottom: 2rem;
+  page-break-after: always;
+}
+
+.report-title {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #f4ee35;
+}
+
+.report-subtitle {
+  font-size: 18px;
+  font-weight: 500;
+  margin-top: 0.5rem;
+  color: #ffffff;
+}
+
+.report-dates {
+  margin-top: 1rem;
+  font-size: 13px;
+  color: #cccccc;
+}
+
+.report-generated {
+  margin-top: 0.25rem;
+  font-size: 11px;
+  color: #777777;
+}
+
+/* ── Sections ────────────────────────────────────────────────────────── */
+
+.report-section {
+  margin-bottom: 2rem;
+  page-break-inside: avoid;
+}
+
+.report-heading {
+  font-size: 15px;
+  font-weight: 600;
+  color: #f4ee35;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid #262626;
+  padding-bottom: 0.5rem;
+}
+
+.report-empty {
+  color: #777777;
+  font-style: italic;
+}
+
+/* ── Medications ─────────────────────────────────────────────────────── */
+
+.report-med {
+  margin-bottom: 1.5rem;
+  padding: 0.75rem;
+  border: 1px solid #262626;
+  border-radius: 4px;
+}
+
+.report-med-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  margin-bottom: 0.5rem;
+}
+
+.report-label {
+  color: #777777;
+  width: 80px;
+  vertical-align: top;
+  padding-right: 0.5rem;
+  white-space: nowrap;
+}
+
+/* ── Tables ──────────────────────────────────────────────────────────── */
+
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.report-table th {
+  text-align: left;
+  font-size: 10px;
+  font-weight: 500;
+  color: #777777;
+  border-bottom: 1px solid #262626;
+  padding: 4px 6px;
+}
+
+.report-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid #0e0e0e;
+  color: #cccccc;
+  font-size: 10px;
+}
+
+.report-log-table {
+  page-break-inside: auto;
+}
+
+.report-log-table tr {
+  page-break-inside: avoid;
+}
+
+/* ── Disclaimer ──────────────────────────────────────────────────────── */
+
+.report-disclaimer {
+  margin-top: 1.5rem;
+  font-size: 9px;
+  color: #777777;
+  border-top: 1px solid #262626;
+  padding-top: 0.5rem;
+}
+
+/* ── Print media ─────────────────────────────────────────────────────── */
+
+@media print {
+  .report {
+    background: #000000 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
