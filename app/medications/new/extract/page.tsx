@@ -6,12 +6,25 @@ import { getActivePatient } from "@/lib/active-patient";
 import { DOCUMENTS_BUCKET, SIGNED_URL_TTL_SECONDS } from "@/lib/documents";
 import { DOSE_UNITS, ROUTES, FORM_TYPES } from "@/lib/types";
 import { ExtractionField } from "@/app/medications/_components/extraction-field";
-import { confirmPhotoExtraction } from "@/app/medications/actions";
-import type { VialExtraction } from "@/lib/extraction";
+import {
+  confirmPhotoExtraction,
+  confirmPrescriptionExtraction,
+} from "@/app/medications/actions";
+import type { VialExtraction, PrescriptionExtraction } from "@/lib/extraction";
 
 // Extraction review page (PRD §5.2.1). Shows extracted fields with confidence
 // indicators for user review/editing before creating the medication.
+// Handles both vial and prescription extractions (§13.8–9).
 // Extraction NEVER auto-commits (hard rule #6).
+
+function isVialExtraction(obj: unknown): obj is VialExtraction {
+  return (
+    typeof obj === "object" &&
+    obj !== null &&
+    "drug_name_raw" in obj &&
+    "concentration_amount" in obj
+  );
+}
 
 export default async function ExtractionReviewPage({
   searchParams,
@@ -30,11 +43,10 @@ export default async function ExtractionReviewPage({
   const active = await getActivePatient(supabase);
   if (!active || active.role !== "owner") redirect("/dashboard");
 
-  // Load the document and its extraction.
   const admin = createAdminClient();
   const { data: doc } = await admin
     .from("documents")
-    .select("id, storage_path, extracted_json, status, mime_type")
+    .select("id, storage_path, extracted_json, status, document_type")
     .eq("id", docId)
     .single();
 
@@ -42,7 +54,11 @@ export default async function ExtractionReviewPage({
     redirect("/medications/new?error=No+extraction+found+for+this+document");
   }
 
-  const extraction = doc.extracted_json as unknown as VialExtraction;
+  const isVial = isVialExtraction(doc.extracted_json);
+  const vial = isVial ? (doc.extracted_json as unknown as VialExtraction) : null;
+  const rx = !isVial
+    ? (doc.extracted_json as unknown as PrescriptionExtraction)
+    : null;
 
   // Generate signed URL for the thumbnail.
   const { data: signed } = await supabase.storage
@@ -66,7 +82,7 @@ export default async function ExtractionReviewPage({
 
       <main className="mx-auto max-w-2xl px-6 py-10">
         <h1 className="text-xl font-medium tracking-tight">
-          Review extraction
+          Review {isVial ? "vial" : "prescription"} extraction
         </h1>
         <p className="mt-1 text-sm text-faint">
           Check each field below. Edit anything the AI got wrong, then confirm
@@ -79,7 +95,6 @@ export default async function ExtractionReviewPage({
           </p>
         ) : null}
 
-        {/* Source photo thumbnail */}
         {thumbnailUrl ? (
           <div className="mt-6">
             <a
@@ -95,179 +110,258 @@ export default async function ExtractionReviewPage({
                 className="h-32 rounded-md border border-line object-cover"
               />
             </a>
-            <p className="mt-1 text-xs text-faint">
-              Tap to view full image
-            </p>
+            <p className="mt-1 text-xs text-faint">Tap to view full image</p>
           </div>
         ) : null}
 
-        <form action={confirmPhotoExtraction} className="mt-6 space-y-6">
-          <input type="hidden" name="document_id" value={docId} />
+        {/* ── Vial extraction form ───────────────────────────────── */}
+        {vial ? (
+          <form action={confirmPhotoExtraction} className="mt-6 space-y-6">
+            <input type="hidden" name="document_id" value={docId} />
 
-          {/* ── Drug identity ─────────────────────────────────── */}
-          <fieldset className="space-y-4 rounded-md border border-line p-4">
-            <legend className="text-sm font-medium text-paper">
-              Drug identity
-            </legend>
+            <fieldset className="space-y-4 rounded-md border border-line p-4">
+              <legend className="text-sm font-medium text-paper">
+                Drug identity
+              </legend>
+              <ExtractionField
+                label="Drug name"
+                name="drug_name"
+                value={
+                  vial.drug_name_canonical.value || vial.drug_name_raw.value
+                }
+                confidence={vial.drug_name_canonical.confidence}
+              />
+              <ExtractionField
+                label="Strength"
+                name="strength"
+                value={vial.strength.value}
+                confidence={vial.strength.confidence}
+              />
+              <ExtractionField
+                label="Route"
+                name="route"
+                value={vial.route.value}
+                confidence={vial.route.confidence}
+              />
+            </fieldset>
 
-            <ExtractionField
-              label="Drug name"
-              name="drug_name"
-              value={extraction.drug_name_canonical.value || extraction.drug_name_raw.value}
-              confidence={extraction.drug_name_canonical.confidence}
-            />
-            <ExtractionField
-              label="Strength"
-              name="strength"
-              value={extraction.strength.value}
-              confidence={extraction.strength.confidence}
-            />
-            <ExtractionField
-              label="Route"
-              name="route"
-              value={extraction.route.value}
-              confidence={extraction.route.confidence}
-            />
-          </fieldset>
-
-          {/* ── Dosage ────────────────────────────────────────── */}
-          <fieldset className="space-y-4 rounded-md border border-line p-4">
-            <legend className="text-sm font-medium text-paper">
-              Dosage
-            </legend>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label htmlFor="dose_amount" className="block text-sm text-muted">
-                  Dose amount
-                </label>
-                <input
-                  id="dose_amount"
-                  name="dose_amount"
-                  type="number"
-                  step="any"
-                  defaultValue={extraction.concentration_amount.value ?? ""}
-                  required
-                  className="mt-1 block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent"
-                />
+            <fieldset className="space-y-4 rounded-md border border-line p-4">
+              <legend className="text-sm font-medium text-paper">Dosage</legend>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="dose_amount" className="block text-sm text-muted">
+                    Dose amount
+                  </label>
+                  <input
+                    id="dose_amount"
+                    name="dose_amount"
+                    type="number"
+                    step="any"
+                    defaultValue={vial.concentration_amount.value ?? ""}
+                    required
+                    className="mt-1 block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="dose_unit" className="block text-sm text-muted">
+                    Unit
+                  </label>
+                  <select
+                    id="dose_unit"
+                    name="dose_unit"
+                    defaultValue={vial.concentration_unit.value || "mg"}
+                    className="mt-1 block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent"
+                  >
+                    {DOSE_UNITS.map((u) => (
+                      <option key={u} value={u}>{u}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
+            </fieldset>
+
+            <fieldset className="space-y-4 rounded-md border border-line p-4">
+              <legend className="text-sm font-medium text-paper">
+                Delivery form
+              </legend>
               <div>
-                <label htmlFor="dose_unit" className="block text-sm text-muted">
-                  Unit
+                <label htmlFor="form_type" className="block text-sm text-muted">
+                  Form type
                 </label>
                 <select
-                  id="dose_unit"
-                  name="dose_unit"
-                  defaultValue={extraction.concentration_unit.value || "mg"}
+                  id="form_type"
+                  name="form_type"
+                  defaultValue="vial"
                   className="mt-1 block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent"
                 >
-                  {DOSE_UNITS.map((u) => (
-                    <option key={u} value={u}>
-                      {u}
-                    </option>
+                  {FORM_TYPES.map((f) => (
+                    <option key={f} value={f}>{f}</option>
                   ))}
                 </select>
               </div>
-            </div>
-          </fieldset>
-
-          {/* ── Delivery form ─────────────────────────────────── */}
-          <fieldset className="space-y-4 rounded-md border border-line p-4">
-            <legend className="text-sm font-medium text-paper">
-              Delivery form
-            </legend>
-
-            <div>
-              <label htmlFor="form_type" className="block text-sm text-muted">
-                Form type
-              </label>
-              <select
-                id="form_type"
-                name="form_type"
-                defaultValue="vial"
-                className="mt-1 block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent"
-              >
-                {FORM_TYPES.map((f) => (
-                  <option key={f} value={f}>
-                    {f}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="grid gap-4 sm:grid-cols-3">
+                <ExtractionField
+                  label="Concentration"
+                  name="concentration_amount"
+                  value={String(vial.concentration_amount.value ?? "")}
+                  confidence={vial.concentration_amount.confidence}
+                  type="number"
+                  step="any"
+                />
+                <ExtractionField
+                  label="Conc. unit"
+                  name="concentration_unit"
+                  value={vial.concentration_unit.value}
+                  confidence={vial.concentration_unit.confidence}
+                />
+                <ExtractionField
+                  label="Per volume (mL)"
+                  name="concentration_per_volume"
+                  value={String(vial.concentration_per_volume.value ?? "")}
+                  confidence={vial.concentration_per_volume.confidence}
+                  type="number"
+                  step="any"
+                />
+              </div>
               <ExtractionField
-                label="Concentration"
-                name="concentration_amount"
-                value={String(extraction.concentration_amount.value ?? "")}
-                confidence={extraction.concentration_amount.confidence}
+                label="Volume (mL)"
+                name="volume_ml"
+                value={String(vial.volume_ml.value ?? "")}
+                confidence={vial.volume_ml.confidence}
                 type="number"
                 step="any"
               />
               <ExtractionField
-                label="Conc. unit"
-                name="concentration_unit"
-                value={extraction.concentration_unit.value}
-                confidence={extraction.concentration_unit.confidence}
+                label="Manufacturer"
+                name="manufacturer"
+                value={vial.manufacturer.value}
+                confidence={vial.manufacturer.confidence}
+              />
+              <div className="grid gap-4 sm:grid-cols-2">
+                <ExtractionField
+                  label="Batch / lot"
+                  name="batch"
+                  value={vial.batch.value}
+                  confidence={vial.batch.confidence}
+                />
+                <ExtractionField
+                  label="Expiry date"
+                  name="expiry_date"
+                  value={vial.expiry_date.value}
+                  confidence={vial.expiry_date.confidence}
+                />
+              </div>
+            </fieldset>
+
+            <SubmitButtons />
+          </form>
+        ) : null}
+
+        {/* ── Prescription extraction form ────────────────────────── */}
+        {rx ? (
+          <form
+            action={confirmPrescriptionExtraction}
+            className="mt-6 space-y-6"
+          >
+            <input type="hidden" name="document_id" value={docId} />
+
+            <fieldset className="space-y-4 rounded-md border border-line p-4">
+              <legend className="text-sm font-medium text-paper">
+                Drug identity
+              </legend>
+              <ExtractionField
+                label="Drug name"
+                name="drug_name"
+                value={rx.drug_name.value}
+                confidence={rx.drug_name.confidence}
               />
               <ExtractionField
-                label="Per volume (mL)"
-                name="concentration_per_volume"
-                value={String(extraction.concentration_per_volume.value ?? "")}
-                confidence={extraction.concentration_per_volume.confidence}
-                type="number"
-                step="any"
+                label="Route"
+                name="route"
+                value={rx.route.value}
+                confidence={rx.route.confidence}
               />
-            </div>
+            </fieldset>
 
-            <ExtractionField
-              label="Volume (mL)"
-              name="volume_ml"
-              value={String(extraction.volume_ml.value ?? "")}
-              confidence={extraction.volume_ml.confidence}
-              type="number"
-              step="any"
-            />
-
-            <ExtractionField
-              label="Manufacturer"
-              name="manufacturer"
-              value={extraction.manufacturer.value}
-              confidence={extraction.manufacturer.confidence}
-            />
-
-            <div className="grid gap-4 sm:grid-cols-2">
+            <fieldset className="space-y-4 rounded-md border border-line p-4">
+              <legend className="text-sm font-medium text-paper">
+                Prescribed regimen
+              </legend>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <ExtractionField
+                  label="Dose amount"
+                  name="dose_amount"
+                  value={String(rx.dose_amount.value ?? "")}
+                  confidence={rx.dose_amount.confidence}
+                  type="number"
+                  step="any"
+                />
+                <ExtractionField
+                  label="Dose unit"
+                  name="dose_unit"
+                  value={rx.dose_unit.value || "mg"}
+                  confidence={rx.dose_unit.confidence}
+                />
+              </div>
               <ExtractionField
-                label="Batch / lot"
-                name="batch"
-                value={extraction.batch.value}
-                confidence={extraction.batch.confidence}
+                label="Frequency"
+                name="frequency"
+                value={rx.frequency.value}
+                confidence={rx.frequency.confidence}
               />
-              <ExtractionField
-                label="Expiry date"
-                name="expiry_date"
-                value={extraction.expiry_date.value}
-                confidence={extraction.expiry_date.confidence}
-              />
-            </div>
-          </fieldset>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <ExtractionField
+                  label="Duration (days)"
+                  name="duration_days"
+                  value={String(rx.duration_days.value ?? "")}
+                  confidence={rx.duration_days.confidence}
+                  type="number"
+                />
+                <ExtractionField
+                  label="Refills"
+                  name="refills"
+                  value={String(rx.refills.value ?? "")}
+                  confidence={rx.refills.confidence}
+                  type="number"
+                />
+              </div>
+            </fieldset>
 
-          <div className="flex gap-3 pt-2">
-            <button
-              type="submit"
-              className="rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-ink transition-opacity hover:opacity-90"
-            >
-              Confirm & create medication
-            </button>
-            <Link
-              href="/medications/new"
-              className="rounded-md border border-line px-4 py-2 text-sm text-muted transition-colors hover:bg-surface"
-            >
-              Discard
-            </Link>
-          </div>
-        </form>
+            <fieldset className="space-y-4 rounded-md border border-line p-4">
+              <legend className="text-sm font-medium text-paper">
+                Prescriber
+              </legend>
+              <ExtractionField
+                label="Prescriber name"
+                name="prescriber"
+                value={rx.prescriber.value}
+                confidence={rx.prescriber.confidence}
+              />
+            </fieldset>
+
+            <SubmitButtons />
+          </form>
+        ) : null}
       </main>
+    </div>
+  );
+}
+
+function SubmitButtons() {
+  return (
+    <div className="flex gap-3 pt-2">
+      <button
+        type="submit"
+        className="rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-ink transition-opacity hover:opacity-90"
+      >
+        Confirm & create medication
+      </button>
+      <Link
+        href="/medications/new"
+        className="rounded-md border border-line px-4 py-2 text-sm text-muted transition-colors hover:bg-surface"
+      >
+        Discard
+      </Link>
     </div>
   );
 }

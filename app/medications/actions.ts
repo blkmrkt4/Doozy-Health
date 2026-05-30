@@ -28,8 +28,11 @@ import {
 } from "@/lib/types";
 import {
   extractVial,
+  extractPrescription,
+  normaliseDrugName,
   writeExtractionDeltas,
   type VialExtraction,
+  type PrescriptionExtraction,
 } from "@/lib/extraction";
 
 function failNew(message: string): never {
@@ -506,16 +509,17 @@ export async function deleteDoseLog(formData: FormData) {
   redirect(`/medications/${medicationId}`);
 }
 
-// ── AI extraction — vials (PRD §5.2, §13.8) ───────────────────────────────
+// ── AI extraction (PRD §5.2, §13.8–9) ──────────────────────────────────────
 
 function failExtract(message: string): never {
   redirect(`/medications/new?error=${encodeURIComponent(message)}`);
 }
 
 /**
- * Upload a photo and run extract_vial. Stores the document, runs the
- * extraction, and redirects to the review page. Does NOT write to the
- * medication tables (hard rule #6 — never auto-commit an extraction).
+ * Upload a photo and run extraction (vial or prescription based on
+ * document_type). Stores the document, runs the appropriate extraction,
+ * and redirects to the review page. Does NOT write to medication tables
+ * (hard rule #6 — never auto-commit an extraction).
  */
 export async function uploadAndExtract(formData: FormData) {
   const supabase = await createClient();
@@ -527,6 +531,11 @@ export async function uploadAndExtract(formData: FormData) {
   const active = await getActivePatient(supabase);
   if (!active) failExtract("No active patient.");
   if (active.role !== "owner") failExtract("Only the patient owner can add a medication.");
+
+  const docTypeRaw = str(formData, "document_type") || "vial_photo";
+  const documentType = docTypeRaw === "prescription_scan"
+    ? "prescription_scan" as const
+    : "vial_photo" as const;
 
   const file = formData.get("photo");
   if (!(file instanceof File) || file.size === 0) {
@@ -555,7 +564,7 @@ export async function uploadAndExtract(formData: FormData) {
     file_name: file.name,
     mime_type: file.type,
     size_bytes: file.size,
-    document_type: "vial_photo",
+    document_type: documentType,
     uploaded_by: user.id,
   });
   if (rowErr) {
@@ -575,7 +584,10 @@ export async function uploadAndExtract(formData: FormData) {
     .eq("archived", false);
   const medNames = (meds ?? []).map((m) => m.display_name as string).join(", ");
 
-  const result = await extractVial(docId, base64, medNames, "metric");
+  // Run the appropriate extraction.
+  const result = documentType === "prescription_scan"
+    ? await extractPrescription(docId, base64, medNames)
+    : await extractVial(docId, base64, medNames, "metric");
 
   if (!result.ok) {
     redirect(
@@ -722,6 +734,129 @@ export async function confirmPhotoExtraction(formData: FormData) {
     userValues,
     direction: "llm_to_user",
     promptSlug: "extract_vial",
+    promptVersionId: (prompt?.current_version_id as string) ?? "",
+    modelUsed: (lastLog?.model_used as string) ?? "unknown",
+  });
+
+  revalidatePath("/dashboard");
+  redirect(`/medications/${medId as string}`);
+}
+
+/**
+ * Confirm a prescription extraction: create the medication from the
+ * user-edited fields and write extraction_deltas (PRD §5.2.3, §13.9).
+ */
+export async function confirmPrescriptionExtraction(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const active = await getActivePatient(supabase);
+  if (!active) failNew("No active patient.");
+  if (active.role !== "owner") failNew("Only the patient owner can add a medication.");
+
+  const docId = str(formData, "document_id");
+  if (!docId) failNew("Missing document reference.");
+
+  const admin = createAdminClient();
+
+  const { data: doc } = await admin
+    .from("documents")
+    .select("extracted_json")
+    .eq("id", docId)
+    .single();
+  if (!doc?.extracted_json) failNew("No extraction found for this document.");
+
+  const extraction = doc.extracted_json as unknown as PrescriptionExtraction;
+
+  const displayName = str(formData, "drug_name");
+  if (!displayName) failNew("Enter the medication name.");
+
+  const doseAmount = Number(str(formData, "dose_amount"));
+  if (!Number.isFinite(doseAmount) || doseAmount <= 0) {
+    failNew("Enter a valid dose amount.");
+  }
+  const doseUnit = inSet(str(formData, "dose_unit"), DOSE_UNITS);
+  if (!doseUnit) failNew("Choose a valid dose unit.");
+  const route = inSet(str(formData, "route"), ROUTES);
+  if (!route) failNew("Choose a valid route.");
+
+  const durationDays = str(formData, "duration_days");
+  const prescriber = str(formData, "prescriber");
+
+  // Parse frequency from the free-text field — default to as_needed.
+  const frequency: Frequency = { type: "as_needed" };
+
+  const { data: medId, error: medErr } = await supabase.rpc(
+    "create_manual_medication",
+    {
+      p_patient_id: active.id,
+      p_display_name: displayName,
+      p_is_private: false,
+      p_prescribed: {
+        dose_amount: doseAmount,
+        dose_unit: doseUnit,
+        route,
+        frequency,
+        duration_days: durationDays,
+        prescriber_name: prescriber,
+      },
+      p_delivery: {
+        form_type: "pill_bottle",
+      },
+      p_chosen: {
+        dose_amount: doseAmount,
+        dose_unit: doseUnit,
+        route,
+        frequency,
+      },
+    }
+  );
+
+  if (medErr) failNew(`Could not save the medication: ${medErr.message}`);
+
+  // Link the document.
+  await admin
+    .from("documents")
+    .update({ linked_medication_id: medId })
+    .eq("id", docId);
+
+  // Write extraction deltas.
+  const userValues: Record<string, string> = {
+    drug_name: displayName,
+    dose_amount: str(formData, "dose_amount"),
+    dose_unit: str(formData, "dose_unit"),
+    frequency: str(formData, "frequency"),
+    duration_days: durationDays,
+    route: str(formData, "route"),
+    prescriber,
+    refills: str(formData, "refills"),
+  };
+
+  const { data: prompt } = await admin
+    .from("prompts")
+    .select("current_version_id")
+    .eq("slug", "extract_prescription")
+    .single();
+
+  const { data: lastLog } = await admin
+    .from("llm_call_logs")
+    .select("model_used")
+    .eq("prompt_slug", "extract_prescription")
+    .eq("success", true)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single();
+
+  await writeExtractionDeltas({
+    documentId: docId,
+    drugCanonicalName: displayName,
+    extraction,
+    userValues,
+    direction: "llm_to_user",
+    promptSlug: "extract_prescription",
     promptVersionId: (prompt?.current_version_id as string) ?? "",
     modelUsed: (lastLog?.model_used as string) ?? "unknown",
   });

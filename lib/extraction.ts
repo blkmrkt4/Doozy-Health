@@ -29,9 +29,28 @@ export type VialExtraction = {
   manufacturer: ExtractedField;
 };
 
+export type PrescriptionExtraction = {
+  drug_name: ExtractedField;
+  dose_amount: ExtractedField<number | null>;
+  dose_unit: ExtractedField;
+  frequency: ExtractedField;
+  duration_days: ExtractedField<number | null>;
+  route: ExtractedField;
+  prescriber: ExtractedField;
+  refills: ExtractedField<number | null>;
+};
+
+export type ExtractionType = "vial" | "prescription";
+
 export type ExtractionResult =
-  | { ok: true; extraction: VialExtraction; modelUsed: string; promptVersionId: string }
+  | { ok: true; extraction: VialExtraction; type: "vial"; modelUsed: string; promptVersionId: string }
+  | { ok: true; extraction: PrescriptionExtraction; type: "prescription"; modelUsed: string; promptVersionId: string }
   | { ok: false; error: string };
+
+export type NormalisationResult = {
+  canonicalName: string;
+  drugId: string | null;
+};
 
 // ── Defensive JSON parser ──────────────────────────────────────────────────
 
@@ -126,6 +145,22 @@ function parseVialExtraction(raw: string): VialExtraction | null {
   };
 }
 
+function parsePrescriptionExtraction(raw: string): PrescriptionExtraction | null {
+  const obj = extractJson(raw);
+  if (!obj) return null;
+
+  return {
+    drug_name: parseStringField(obj, "drug_name"),
+    dose_amount: parseNumberField(obj, "dose_amount"),
+    dose_unit: parseStringField(obj, "dose_unit"),
+    frequency: parseStringField(obj, "frequency"),
+    duration_days: parseNumberField(obj, "duration_days"),
+    route: parseStringField(obj, "route"),
+    prescriber: parseStringField(obj, "prescriber"),
+    refills: parseNumberField(obj, "refills"),
+  };
+}
+
 // ── extractVial ────────────────────────────────────────────────────────────
 
 /**
@@ -193,8 +228,119 @@ export async function extractVial(
   return {
     ok: true,
     extraction,
+    type: "vial",
     modelUsed: result.modelUsed,
     promptVersionId: (prompt?.current_version_id as string) ?? "",
+  };
+}
+
+// ── extractPrescription ────────────────────────────────────────────────────
+
+/**
+ * Run the extract_prescription prompt against a prescription photo or text.
+ * Handles both photo (via opts.images) and pasted text (via prescription_text
+ * placeholder) cases. Same pattern as extractVial.
+ */
+export async function extractPrescription(
+  documentId: string,
+  imageBase64OrText: string,
+  patientMedications: string,
+  isText: boolean = false
+): Promise<ExtractionResult> {
+  const admin = createAdminClient();
+
+  await admin
+    .from("documents")
+    .update({ status: "processing" })
+    .eq("id", documentId);
+
+  const vars: Record<string, string> = {
+    known_medications: patientMedications,
+    prescription_text: isText ? imageBase64OrText : "(see attached)",
+  };
+
+  const result = await llmCall(
+    "extract_prescription",
+    vars,
+    isText ? undefined : { images: [imageBase64OrText] }
+  );
+
+  if (!result.ok) {
+    await admin
+      .from("documents")
+      .update({ status: "failed" })
+      .eq("id", documentId);
+    return { ok: false, error: result.error };
+  }
+
+  const extraction = parsePrescriptionExtraction(result.text);
+  if (!extraction) {
+    await admin
+      .from("documents")
+      .update({ status: "failed" })
+      .eq("id", documentId);
+    return { ok: false, error: "Could not parse the prescription extraction." };
+  }
+
+  await admin
+    .from("documents")
+    .update({
+      extracted_json: extraction,
+      status: "extracted",
+    })
+    .eq("id", documentId);
+
+  const { data: prompt } = await admin
+    .from("prompts")
+    .select("current_version_id")
+    .eq("slug", "extract_prescription")
+    .single();
+
+  return {
+    ok: true,
+    extraction,
+    type: "prescription",
+    modelUsed: result.modelUsed,
+    promptVersionId: (prompt?.current_version_id as string) ?? "",
+  };
+}
+
+// ── normaliseDrugName ──────────────────────────────────────────────────────
+
+/**
+ * Map a raw drug name (from OCR / user input) to a canonical drugs record
+ * via the normalise_drug_name prompt (PRD §14.8). Returns the canonical name
+ * and, if matched, the drug ID from the reference catalogue.
+ */
+export async function normaliseDrugName(
+  rawName: string,
+  knownDrugs: string,
+  locale: string = "en-GB"
+): Promise<NormalisationResult | null> {
+  const result = await llmCall("normalise_drug_name", {
+    raw_name: rawName,
+    known_drugs: knownDrugs,
+    user_locale: locale,
+  });
+
+  if (!result.ok) return null;
+
+  const obj = extractJson(result.text);
+  if (!obj) return null;
+
+  const canonicalName = String(obj.canonical_name ?? obj.canonicalName ?? rawName);
+
+  // Try to match the canonical name against the drugs table.
+  const admin = createAdminClient();
+  const { data: drug } = await admin
+    .from("drugs")
+    .select("id")
+    .ilike("canonical_name", canonicalName)
+    .maybeSingle();
+
+  return {
+    canonicalName,
+    drugId: (drug?.id as string) ?? null,
   };
 }
 
@@ -204,11 +350,14 @@ export async function extractVial(
  * Write one extraction_deltas row per field where the LLM value differs from
  * the user-confirmed value (PRD §5.2.3). No patient_id, no medication_id
  * (hard rule #10). Called after the user confirms the extraction.
+ *
+ * Works with both VialExtraction and PrescriptionExtraction — the extraction
+ * param is a generic record of ExtractedField values keyed by field name.
  */
 export async function writeExtractionDeltas(opts: {
   documentId: string | null;
   drugCanonicalName: string;
-  extraction: VialExtraction;
+  extraction: Record<string, ExtractedField<unknown>>;
   userValues: Record<string, string>;
   direction: "llm_to_user" | "user_to_llm";
   promptSlug: string;
@@ -217,26 +366,10 @@ export async function writeExtractionDeltas(opts: {
 }): Promise<void> {
   const admin = createAdminClient();
 
-  // Compare each extracted field with the user-confirmed value.
-  const fields: { key: keyof VialExtraction; userKey: string }[] = [
-    { key: "drug_name_raw", userKey: "drug_name_raw" },
-    { key: "drug_name_canonical", userKey: "drug_name_canonical" },
-    { key: "strength", userKey: "strength" },
-    { key: "concentration_amount", userKey: "concentration_amount" },
-    { key: "concentration_unit", userKey: "concentration_unit" },
-    { key: "concentration_per_volume", userKey: "concentration_per_volume" },
-    { key: "volume_ml", userKey: "volume_ml" },
-    { key: "route", userKey: "route" },
-    { key: "expiry_date", userKey: "expiry_date" },
-    { key: "batch", userKey: "batch" },
-    { key: "manufacturer", userKey: "manufacturer" },
-  ];
-
   const rows = [];
-  for (const { key, userKey } of fields) {
-    const field = opts.extraction[key];
+  for (const [key, field] of Object.entries(opts.extraction)) {
     const llmValue = String(field.value ?? "");
-    const userValue = opts.userValues[userKey] ?? "";
+    const userValue = opts.userValues[key] ?? "";
 
     if (llmValue !== userValue) {
       rows.push({
