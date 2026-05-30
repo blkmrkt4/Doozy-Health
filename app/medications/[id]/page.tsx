@@ -12,6 +12,8 @@ import {
   INJECTABLE_FORM_TYPES,
   type FormType,
 } from "@/lib/types";
+import { checkInteractions, type InteractionRecord } from "@/lib/interactions";
+import { InteractionCard } from "@/app/medications/_components/interaction-card";
 import {
   archiveMedication,
   attachMedicationPhoto,
@@ -156,6 +158,17 @@ export default async function MedicationDetailPage({
     escalation_delay_min: number | null;
   } | null;
 
+  // Drug interactions (PRD §5.8, §13.14). Pairwise check against other
+  // active medications' canonical drug IDs.
+  let interactions: InteractionRecord[] = [];
+  if (med.canonical_drug_id) {
+    interactions = await checkInteractions(
+      supabase,
+      med.patient_id,
+      med.canonical_drug_id
+    );
+  }
+
   // Attached documents + short-lived signed URLs (PRD §6.2). RLS scopes the
   // rows; the signed URLs respect storage RLS (is_private-aware).
   const { data: docData } = await supabase
@@ -215,6 +228,26 @@ export default async function MedicationDetailPage({
           <p className="rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">
             {errorParam}
           </p>
+        ) : null}
+
+        {/* Drug interactions (PRD §5.8). Shows curated interaction records.
+            Framing is informational, never directive (§6.1). */}
+        {interactions.length > 0 ? (
+          <section className="space-y-3">
+            <h2 className="text-sm font-medium text-paper">
+              Known interactions
+            </h2>
+            {interactions.map((ix) => (
+              <InteractionCard
+                key={ix.id}
+                interactionId={ix.id}
+                drugName={med.display_name}
+                otherDrugName={ix.otherDrugName}
+                severity={ix.severity}
+                mechanism={ix.mechanism}
+              />
+            ))}
+          </section>
         ) : null}
 
         {/* Log a dose — the primary action. One tap for the scheduled dose;

@@ -35,6 +35,7 @@ import {
   type PrescriptionExtraction,
 } from "@/lib/extraction";
 import { generateReminders } from "@/lib/reminders";
+import { explainInteraction } from "@/lib/interactions";
 
 function failNew(message: string): never {
   redirect(`/medications/new?error=${encodeURIComponent(message)}`);
@@ -993,4 +994,22 @@ export async function disableSchedule(formData: FormData) {
 
   revalidatePath(`/medications/${medicationId}`);
   redirect(`/medications/${medicationId}`);
+}
+
+// ── Drug interactions (PRD §5.8, §13.14) ───────────────────────────────────
+
+/**
+ * Render a curated drug interaction in plain English via the
+ * explain_interaction prompt. The LLM does NOT enumerate — it only
+ * explains the record we pass in (CLAUDE.md hard rule #9).
+ */
+export async function explainInteractionAction(
+  formData: FormData
+): Promise<string> {
+  const drugA = str(formData, "drug_a_name");
+  const drugB = str(formData, "drug_b_name");
+  const mechanism = str(formData, "mechanism");
+  const severity = str(formData, "severity");
+
+  return explainInteraction(drugA, drugB, mechanism, severity);
 }

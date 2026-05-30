@@ -19,6 +19,7 @@ type ChosenRow = {
 type MedicationRow = {
   id: string;
   display_name: string;
+  canonical_drug_id: string | null;
   is_private: boolean;
   entry_source: string;
   chosen_regimens: ChosenRow[] | null;
@@ -98,7 +99,7 @@ export default async function DashboardPage() {
   const { data } = await supabase
     .from("medications")
     .select(
-      "id, display_name, is_private, entry_source, chosen_regimens(dose_amount, dose_unit, frequency, route, active)"
+      "id, display_name, canonical_drug_id, is_private, entry_source, chosen_regimens(dose_amount, dose_unit, frequency, route, active)"
     )
     .eq("archived", false)
     .eq("chosen_regimens.active", true)
@@ -109,6 +110,39 @@ export default async function DashboardPage() {
   // Owners and caregivers can log doses (PRD §5.6); viewers cannot.
   const canLog =
     activePatient?.role === "owner" || activePatient?.role === "caregiver";
+
+  // Drug interaction check: which medications have known interactions? (PRD §5.8)
+  // Build a set of drug IDs that have at least one interaction with another
+  // active medication on this patient.
+  const drugIds = medications
+    .map((m) => m.canonical_drug_id)
+    .filter((id): id is string => Boolean(id));
+  const medsWithInteractions = new Set<string>();
+
+  if (drugIds.length >= 2) {
+    // Query all interactions involving any pair of the patient's drug IDs.
+    const { data: ixRows } = await supabase
+      .from("drug_interactions")
+      .select("drug_a_id, drug_b_id")
+      .in("drug_a_id", drugIds)
+      .in("drug_b_id", drugIds);
+
+    const drugIdToMedIds = new Map<string, string[]>();
+    for (const m of medications) {
+      if (m.canonical_drug_id) {
+        const arr = drugIdToMedIds.get(m.canonical_drug_id) ?? [];
+        arr.push(m.id);
+        drugIdToMedIds.set(m.canonical_drug_id, arr);
+      }
+    }
+
+    for (const row of ixRows ?? []) {
+      const aMeds = drugIdToMedIds.get(row.drug_a_id as string) ?? [];
+      const bMeds = drugIdToMedIds.get(row.drug_b_id as string) ?? [];
+      for (const id of aMeds) medsWithInteractions.add(id);
+      for (const id of bMeds) medsWithInteractions.add(id);
+    }
+  }
 
   // Latest log per medication, for the neutral "last logged" line (PRD §9).
   // RLS scopes these to medications the caller may read.
@@ -250,6 +284,14 @@ export default async function DashboardPage() {
                           title="Private"
                         >
                           🔒
+                        </span>
+                      ) : null}
+                      {medsWithInteractions.has(m.id) ? (
+                        <span
+                          className="ml-2 align-middle rounded-full bg-yellow-950 px-1.5 py-0.5 text-[10px] font-medium text-yellow-400"
+                          title="Known interaction — view details"
+                        >
+                          interaction
                         </span>
                       ) : null}
                     </p>
