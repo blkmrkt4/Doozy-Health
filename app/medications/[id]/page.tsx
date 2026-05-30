@@ -61,6 +61,7 @@ type Medication = {
   id: string;
   patient_id: string;
   display_name: string;
+  canonical_drug_id: string | null;
   is_private: boolean;
   entry_source: string;
   archived: boolean;
@@ -103,7 +104,7 @@ export default async function MedicationDetailPage({
   const { data } = await supabase
     .from("medications")
     .select(
-      "id, patient_id, display_name, is_private, entry_source, archived, prescribed_regimens(*), delivery_forms(*), chosen_regimens(*)"
+      "id, patient_id, display_name, canonical_drug_id, is_private, entry_source, archived, prescribed_regimens(*), delivery_forms(*), chosen_regimens(*)"
     )
     .eq("id", id)
     .maybeSingle();
@@ -185,6 +186,15 @@ export default async function MedicationDetailPage({
               </span>
             ) : null}
           </h1>
+          {/* Timeline link — shown when drug has PK data (PRD §4.4, §5.7) */}
+          {med.canonical_drug_id ? (
+            <Link
+              href={`/medications/${med.id}/timeline`}
+              className="mt-1 inline-block text-sm text-accent hover:underline"
+            >
+              View timeline
+            </Link>
+          ) : null}
         </div>
 
         {errorParam ? (
