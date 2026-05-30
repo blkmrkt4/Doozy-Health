@@ -4,7 +4,9 @@ import { createClient } from "@/lib/supabase/server";
 import { getActivePatient } from "@/lib/active-patient";
 import { signOut } from "@/app/login/actions";
 import { logScheduledDose } from "@/app/medications/actions";
+import { acceptInvite, declineInvite } from "@/app/settings/caregivers/actions";
 import { formatRegimenSummary, relativeAge } from "@/lib/format";
+import { PatientSwitcher } from "@/app/_components/patient-switcher";
 
 type ChosenRow = {
   dose_amount: string;
@@ -36,6 +38,60 @@ export default async function DashboardPage() {
     .maybeSingle();
 
   const activePatient = await getActivePatient(supabase);
+
+  // Load all patient memberships for the patient switcher (PRD §9, §13.13).
+  const { data: membershipRows } = await supabase
+    .from("patient_memberships")
+    .select("patient_id, role, accepted_at, patients(name)")
+    .order("created_at");
+
+  type SwitcherPatient = { id: string; name: string; role: "owner" | "caregiver" | "viewer" };
+  const allPatients: SwitcherPatient[] = ((membershipRows ?? []) as Array<{
+    patient_id: string;
+    role: string;
+    accepted_at: string | null;
+    patients: { name: string } | { name: string }[] | null;
+  }>)
+    .filter((m) => m.accepted_at !== null) // only accepted memberships
+    .map((m) => {
+      const p = Array.isArray(m.patients) ? m.patients[0] : m.patients;
+      return {
+        id: m.patient_id,
+        name: p?.name ?? "Patient",
+        role: m.role as SwitcherPatient["role"],
+      };
+    });
+
+  // Pending invites for this user (not yet accepted).
+  const pendingInvites = ((membershipRows ?? []) as Array<{
+    patient_id: string;
+    role: string;
+    accepted_at: string | null;
+    patients: { name: string } | { name: string }[] | null;
+  }>)
+    .filter((m) => m.accepted_at === null)
+    .map((m) => {
+      const p = Array.isArray(m.patients) ? m.patients[0] : m.patients;
+      // Need the membership ID for accept/decline. Re-query would be cleaner
+      // but we'll use the patient_id to find it.
+      return {
+        patientId: m.patient_id,
+        patientName: p?.name ?? "Patient",
+        role: m.role,
+      };
+    });
+
+  // Load membership IDs for pending invites (needed for the accept form).
+  let pendingMembershipIds = new Map<string, string>();
+  if (pendingInvites.length > 0) {
+    const { data: pendingRows } = await supabase
+      .from("patient_memberships")
+      .select("id, patient_id")
+      .is("accepted_at", null);
+    for (const r of pendingRows ?? []) {
+      pendingMembershipIds.set(r.patient_id as string, r.id as string);
+    }
+  }
 
   // RLS already restricts these rows to medications the caller may read,
   // including the is_private override for non-owners (PRD §5.6).
@@ -71,20 +127,29 @@ export default async function DashboardPage() {
     <div className="min-h-full">
       <header className="border-b border-line">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-6 py-4">
-          <div className="flex items-baseline gap-3">
+          <div className="flex items-center gap-3">
             <span className="text-base font-medium tracking-tight">
               Doozy<span className="text-accent"> Health</span>
             </span>
             {activePatient ? (
-              <span className="text-sm text-muted">
-                · {activePatient.name}
-                {activePatient.role !== "owner" ? (
-                  <span className="ml-1 text-faint">({activePatient.role})</span>
-                ) : null}
-              </span>
+              allPatients.length > 1 ? (
+                <span className="text-sm">
+                  · <PatientSwitcher patients={allPatients} activeId={activePatient.id} />
+                </span>
+              ) : (
+                <span className="text-sm text-muted">
+                  · {activePatient.name}
+                  {activePatient.role !== "owner" ? (
+                    <span className="ml-1 text-faint">({activePatient.role})</span>
+                  ) : null}
+                </span>
+              )
             ) : null}
           </div>
           <div className="flex items-center gap-3 text-sm">
+            <Link href="/settings" className="text-faint hover:text-muted">
+              Settings
+            </Link>
             <span className="text-faint">{profile?.email ?? user.email}</span>
             <form action={signOut}>
               <button
@@ -99,6 +164,49 @@ export default async function DashboardPage() {
       </header>
 
       <main className="mx-auto max-w-5xl px-6 py-12">
+        {/* Pending invites (PRD §4.5) */}
+        {pendingInvites.length > 0 ? (
+          <section className="mb-8 rounded-md border border-yellow-900 bg-yellow-950/10 p-4 space-y-3">
+            <h2 className="text-sm font-medium text-paper">Pending invites</h2>
+            {pendingInvites.map((inv) => {
+              const mId = pendingMembershipIds.get(inv.patientId);
+              return (
+                <div
+                  key={inv.patientId}
+                  className="flex items-center justify-between gap-3"
+                >
+                  <p className="text-sm text-muted">
+                    <span className="text-paper">{inv.patientName}</span> — invited
+                    as {inv.role}
+                  </p>
+                  {mId ? (
+                    <div className="flex gap-2">
+                      <form action={acceptInvite}>
+                        <input type="hidden" name="membership_id" value={mId} />
+                        <button
+                          type="submit"
+                          className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-ink hover:opacity-90"
+                        >
+                          Accept
+                        </button>
+                      </form>
+                      <form action={declineInvite}>
+                        <input type="hidden" name="membership_id" value={mId} />
+                        <button
+                          type="submit"
+                          className="rounded-md border border-line px-3 py-1.5 text-xs text-muted hover:bg-surface"
+                        >
+                          Decline
+                        </button>
+                      </form>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </section>
+        ) : null}
+
         <section className="flex items-center justify-between">
           <h1 className="text-sm font-medium text-muted">Medications</h1>
           {isOwner ? (
