@@ -17,6 +17,8 @@ import {
   attachMedicationPhoto,
   deleteDocument,
   deleteDoseLog,
+  enableSchedule,
+  disableSchedule,
   logScheduledDose,
   runVerification,
   setMedicationPrivacy,
@@ -141,6 +143,18 @@ export default async function MedicationDetailPage({
     .order("logged_at", { ascending: false })
     .limit(50);
   const logs = logData ?? [];
+
+  // Dose schedule (PRD §5.5). Shows whether reminders are enabled.
+  const { data: scheduleData } = await supabase
+    .from("dose_schedules")
+    .select("id, next_due_at, escalation_delay_min")
+    .eq("medication_id", med.id)
+    .maybeSingle();
+  const schedule = scheduleData as {
+    id: string;
+    next_due_at: string;
+    escalation_delay_min: number | null;
+  } | null;
 
   // Attached documents + short-lived signed URLs (PRD §6.2). RLS scopes the
   // rows; the signed URLs respect storage RLS (is_private-aware).
@@ -313,6 +327,55 @@ export default async function MedicationDetailPage({
             <p className="mt-2 text-sm text-faint">Not set.</p>
           )}
         </section>
+
+        {/* Reminders (PRD §5.5). Enable/disable scheduled reminders for this
+            medication. Only shown for non-as_needed frequencies. */}
+        {isOwner && chosen && typeof chosen.frequency === "object" &&
+          (chosen.frequency as { type: string }).type !== "as_needed" ? (
+          <section className="rounded-md border border-line p-4 space-y-3">
+            <h2 className="text-sm font-medium text-paper">Reminders</h2>
+            {schedule ? (
+              <>
+                <p className="text-sm text-muted">
+                  Reminders enabled. Next due{" "}
+                  <span className="tabular text-paper">
+                    {new Date(schedule.next_due_at).toLocaleString("en-GB", {
+                      day: "2-digit",
+                      month: "short",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </p>
+                <form action={disableSchedule}>
+                  <input type="hidden" name="medication_id" value={med.id} />
+                  <input type="hidden" name="schedule_id" value={schedule.id} />
+                  <button
+                    type="submit"
+                    className="text-sm text-faint underline hover:text-muted"
+                  >
+                    Disable reminders
+                  </button>
+                </form>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-faint">
+                  No reminders set for this medication.
+                </p>
+                <form action={enableSchedule}>
+                  <input type="hidden" name="medication_id" value={med.id} />
+                  <button
+                    type="submit"
+                    className="rounded-md border border-line px-3 py-1.5 text-sm text-muted hover:bg-surface"
+                  >
+                    Enable reminders
+                  </button>
+                </form>
+              </>
+            )}
+          </section>
+        ) : null}
 
         {/* Photos & documents (PRD §5.1). Attach a vial/prescription photo for
             your records; reading + extraction (step 8) build on this. */}

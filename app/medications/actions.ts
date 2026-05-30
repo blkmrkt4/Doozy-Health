@@ -34,6 +34,7 @@ import {
   type VialExtraction,
   type PrescriptionExtraction,
 } from "@/lib/extraction";
+import { generateReminders } from "@/lib/reminders";
 
 function failNew(message: string): never {
   redirect(`/medications/new?error=${encodeURIComponent(message)}`);
@@ -922,4 +923,74 @@ export async function runVerification(formData: FormData) {
   }
 
   redirect(`/medications/${medicationId}/verify?doc=${documentId}`);
+}
+
+// ── Reminders (PRD §5.5, §13.12) ──────────────────────────────────────────
+
+/**
+ * Enable a dose schedule for a medication. Creates a dose_schedules row
+ * and generates the initial batch of reminders.
+ */
+export async function enableSchedule(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const medicationId = str(formData, "medication_id");
+  if (!medicationId) redirect("/dashboard");
+
+  // Load medication's patient_id.
+  const { data: med } = await supabase
+    .from("medications")
+    .select("patient_id")
+    .eq("id", medicationId)
+    .single();
+  if (!med) failDose(medicationId, "Medication not found.");
+
+  const now = new Date();
+  const scheduleId = crypto.randomUUID();
+
+  const { error } = await supabase.from("dose_schedules").insert({
+    id: scheduleId,
+    medication_id: medicationId,
+    patient_id: med.patient_id,
+    next_due_at: now.toISOString(),
+    generated_through: now.toISOString(),
+  });
+
+  if (error) {
+    failDose(medicationId, `Could not enable reminders: ${error.message}`);
+  }
+
+  // Generate initial reminders (7-day lookahead).
+  await generateReminders(scheduleId, 7);
+
+  revalidatePath(`/medications/${medicationId}`);
+  redirect(`/medications/${medicationId}`);
+}
+
+/**
+ * Disable a dose schedule. Deletes the schedule and all pending reminders.
+ */
+export async function disableSchedule(formData: FormData) {
+  const supabase = await createClient();
+  const medicationId = str(formData, "medication_id");
+  const scheduleId = str(formData, "schedule_id");
+
+  if (!medicationId || !scheduleId) redirect("/dashboard");
+
+  // Delete the schedule (cascades to dose_reminders via FK).
+  const { error } = await supabase
+    .from("dose_schedules")
+    .delete()
+    .eq("id", scheduleId);
+
+  if (error) {
+    failDose(medicationId, `Could not disable reminders: ${error.message}`);
+  }
+
+  revalidatePath(`/medications/${medicationId}`);
+  redirect(`/medications/${medicationId}`);
 }
