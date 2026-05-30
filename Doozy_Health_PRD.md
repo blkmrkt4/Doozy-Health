@@ -5,8 +5,8 @@
 | Field | Value |
 |---|---|
 | Author | Robin David Hutchinson |
-| Version | 0.3 (Draft — reconciled against the Numara codebase) |
-| Date | 27 May 2026 |
+| Version | 0.4 (Draft — pharmacokinetic engine, personal calibration, regimen explorer) |
+| Date | 30 May 2026 |
 | Status | For review — pre-engineering |
 | Target platform | Responsive web app (PWA) — desktop, iOS Safari, Android |
 | Regulatory positioning | Wellness / general-purpose — not a medical device, not medical advice |
@@ -15,6 +15,7 @@
 
 | Version | Changes |
 |---|---|
+| **v0.4** | **Pharmacokinetic engine specified properly.** §5.7 rewritten around an explicit **superposition engine + per-route kernel library + linearity gate**, replacing the vague "multi-compartment models where required". The gate is net-new and deliberately *more* conservative — drugs whose kinetics are non-linear (saturable elimination, auto-induction) get an honest "can't model this" state rather than a misleading curve. **Active-metabolite modelling** formalised against the existing `drugs` metabolite parameters. **Uncertainty band** added (population half-life range, not a therapeutic target). **Missed-dose shape** and **time-to-steady-state** views added — both illustrative, neither recommends a dose. **Personal calibration** added as a v1 feature (opt-in, user-entered readings, never a measurement) — this is the one change that shifts the regulatory character and carries a launch dependency on a per-territory SaMD review (§11). **Regimen explorer** added (user-driven, renders curves only, never judges one regimen against another). New `drugs` fields and a patient-scoped `pk_calibrations` table (§7/§8). §6.1 gains a governing **information-vs-instruction** principle and a tightly-scoped calibration copy carve-out. §2.2, §4.4, §9, §13 reconciled. |
 | **v0.3** | Reconciled against the Numara implementation. **Scoping model corrected**: Numara's one-user-one-household single-FK pattern (and its `current_household_id()` helper) does not port — Doozy's caregiver model requires membership-based RLS and an active-patient context (§7, §8, §11). **`llmCall` contract corrected**: real signature is `llmCall(promptSlug, vars, opts?)` with string-only vars; images ride in `opts.images`, not `{{placeholders}}` — seed prompts updated accordingly (§5.2, §14.6, §14.8). **Encryption scope corrected**: app-layer AES-256-GCM covers system secrets only; health data relies on Supabase at-rest + RLS; app-layer encryption of sensitive health fields is now a flagged net-new decision (§6.2, §11). **Auth note**: implemented baseline is email magic link; WebAuthn is aspirational, not yet built (§6.2, §11). Admin entities aligned to the real schema (`system_settings` singleton added; `admin_audit_log` and `llm_call_logs` field names; `openrouter_models.raw`; `system_secrets.value_masked`; slug constraint; seed prompts ship disabled). Stack pinned (Next 16 / React 19 / Tailwind 4 / TS 6, raw SQL migrations, no ORM); new dependencies flagged (§7). |
 | v0.2 | Manual entry promoted to first-class parity with photo capture; optional verification photo on the manual path. `ExtractionDelta` entity and admin **Extractions** page (§14.7) added to capture LLM-vs-user divergences for system improvement. |
 | v0.1 | Initial draft. Three-layer regimen schema, pharmacokinetic visualisation engine, reminders engine with caregiver routing, curated drug-interaction source with LLM-rendered explanations, diary / custom-field model. Wellness positioning codified in language rules (§6.1). |
@@ -49,7 +50,7 @@ Built for one user initially, but the data model is multi-party from day one to 
 
 ### 2.2 Non-goals (v1)
 
-- Medical advice, dose recommendations, treatment suggestions, or symptom checking. The product diaries; the doctor advises.
+- Medical advice, dose recommendations, treatment suggestions, or symptom checking. The product diaries; the doctor advises. **Note on the v0.4 additions:** the personal-calibration and regimen-explorer features (§5.7, §4.8, §4.9) deliberately stay inside this non-goal. Calibration fits a curve to readings *the user enters*; the explorer renders curves for scenarios *the user constructs*. Neither computes, suggests, ranks, or highlights a dose or a regimen. The boundary is the information-vs-instruction line in §6.1: we present information the user interprets; we never make the dosing decision.
 - E-prescribing, prescription renewal, or pharmacy connections.
 - EHR / EMR integration (HL7, FHIR).
 - Telehealth, clinician messaging, or asynchronous care.
@@ -113,10 +114,14 @@ A first-class path with full parity to the photo flow. For users who know their 
 ### 4.4 View dosing timeline (half-life view)
 
 1. User taps a medication.
-2. A line chart shows the modelled concentration in their system over the past 14 days plus the projected next 7, based on their dose history, the drug's half-life, route bioavailability, and time-to-peak.
-3. The chart carries a permanent inline disclaimer: *"Based on textbook half-life. Your body may vary. Not medical advice."*
-4. Annotations: each logged dose marker, projected trough, "you are here" line.
-5. For drugs where chosen regimen materially differs from prescribed (e.g. testosterone with split-dosing), an overlay can show the curve under both regimens — the user can see why their chosen pattern produces a flatter curve. The overlay is illustrative; we never tell the user one regimen is "better".
+2. A line chart shows the **modelled** concentration over the past 14 days plus the projected next 7, built by superposing every logged dose through the drug's per-route kernel (§5.7). The curve runs from the **chosen regimen**.
+3. A shaded **uncertainty band** surrounds the line, reflecting the population half-life *range* for the drug — a visual statement of "your body may vary", not a target zone.
+4. Annotations: each logged dose marker, the **projected trough** (a quiet timeline marker — never an alert, never a countdown), and a "you are here" line.
+5. **Missed-dose shape:** where the log has a gap, the dip is rendered illustratively so the user can see the consequence of what happened. The chart shows the shape; it never shows a corrective amount.
+6. **Chosen-vs-prescribed overlay:** for drugs where the chosen regimen materially differs from the prescribed one (e.g. testosterone split-dosing), the user can overlay both curves and see why their chosen pattern produces a flatter curve. The overlay is illustrative; we never tell the user one regimen is "better".
+7. **New-medication context:** for a newly added drug, the view can show an illustrative "time to a stable level, based on textbook half-life" marker, explaining why effects lag the first dose. General education, not advice.
+8. The chart carries a permanent inline disclaimer: *"Based on textbook half-life. Your body may vary. Not medical advice."* For a calibrated curve (§4.8), the disclaimer reads: *"Your personal estimate, based on the readings you entered. Illustrative, not a measurement. Not medical advice."*
+9. **No** red zones, **no** warning colouring, **no** "you should dose now" prompts anywhere. The chart shows; the user decides.
 
 ### 4.5 Add a caregiver
 
@@ -142,6 +147,26 @@ A first-class path with full parity to the photo flow. For users who know their 
 3. Contents: medication list with the three-layer regimen for each, dose log with timestamps, diary entries (any custom fields the user has been tracking), pharmacokinetic chart snapshot per medication, and original vial / prescription photos as an appendix.
 4. Branded: ByZyB.ai palette — black background, electric yellow `#F4EE35` titles, white body. Disclaimer footer on every page.
 5. Download or send to the clinician's email (with the patient's explicit consent at send time).
+
+### 4.8 Calibrate the curve to your own readings (opt-in)
+
+A user who has their own observed readings (e.g. trough blood results their clinician ordered) can optionally calibrate the modelled curve to fit them better. Off by default; the user opts in per medication.
+
+1. From the timeline view → "Calibrate to my readings" (opt-in, with a one-time explainer of what calibration is and what it is **not**).
+2. User enters one or more readings: value, unit, date/time, optional note. Stored in `pk_calibrations`, patient-scoped, and treatable as **private** (§5.6, §6.2).
+3. With two or more valid readings taken during a decline (no intervening dose between them, or a steady-state trough-to-trough pair), the engine back-solves a **personal terminal half-life** (§5.7) and re-runs the curve. Absorption (Tmax) is **not** fitted from sparse readings — only the terminal half-life is adjusted, within physiologically plausible bounds; implausible fits are rejected and the textbook curve is retained.
+4. The calibrated curve is always shown **alongside** the textbook curve so the user sees the difference, and is clearly tagged "your personal estimate".
+5. Calibration changes only what the curve looks like. It never produces, suggests, or implies a dose. The "no recommendation" posture (§6.1) is unchanged.
+
+### 4.9 Explore a regimen (user-driven, no recommendation)
+
+A sandbox for the sophisticated user (typically HRT / split-dosing) to *see the shape* of a schedule they're considering — like a calculator, not an adviser.
+
+1. From the timeline view → "Explore a regimen".
+2. User constructs a hypothetical chosen regimen: per-dose amount, cadence, route. All inputs are the user's.
+3. The engine renders the resulting curve, and optionally overlays it on the user's current chosen regimen for comparison.
+4. The view presents **only** the curve shapes. It does not rank them, label one "smoother" or "better", highlight an "optimum", or suggest the user adopt any scenario. Per §6.1, the product never judges one regimen against another.
+5. Nothing in the explorer writes to the user's actual chosen regimen. Adopting a scenario is a separate, deliberate edit the user makes in medication settings.
 
 ---
 
@@ -227,13 +252,27 @@ When the user changes the chosen regimen, the reminder schedule regenerates and 
 
 ### 5.7 Pharmacokinetic visualisation
 
-- **Deterministic backend math, not LLM.** Half-life decay curves, multi-compartment models where required, dose superposition over time.
-- The reference `drugs` table stores: half-life (per route, in a JSON map), bioavailability (per route), Tmax (per route), and any secondary metabolites with their own parameters where clinically relevant.
-- Engine input: dose log for a medication. Engine output: a time-series of modelled concentration.
-- Rendered as a line chart over the past 14 days + projected next 7. Annotations: dose markers, projected trough, "you are here" line.
-- Comparative overlay: chosen regimen vs prescribed regimen, side by side, illustrative.
-- Permanent inline disclaimer: *"Based on textbook half-life. Your body may vary. Not medical advice."*
-- No red zones, no "warning" colouring, no "you should dose now" prompts. The chart shows; the user decides.
+**Governing principle.** This view presents information about what the user has logged and what textbook pharmacology says in general. It never recommends, computes, or displays a dose to take, and it never judges one regimen against another. Every output is something the user interprets and discusses with their clinician (§6.1).
+
+**Deterministic, never LLM.** All curve maths is deterministic backend code. No language model is in this path. This is the most correctness-sensitive code in the product (§15).
+
+**Architecture — superposition + kernel library + linearity gate.** The engine is three independent pieces:
+
+- **Superposition engine.** Under linear pharmacokinetics, the modelled level at any time is the sum of the independently-evolving contributions of every prior dose: `level(t) = Σ kernel(dose_i, t − t_i, params)` over doses with `t_i ≤ t`. Drug-agnostic; never changes.
+- **Kernel library.** The single-dose contribution shape, selected **by route** from the drug's parameters. Three kernels in v1: `exponential` (IV-like / robust decline approximation), `bateman` (first-order absorption + elimination, for oral and depot esters; its absorption constant is derived from the stored **Tmax**, not guessed), and `zeroOrder` (constant-rate release then elimination, for transdermal patches and implants). Adding a drug shape is a kernel addition plus reference data; the engine and UI do not change.
+- **Linearity gate.** A per-drug boolean (`is_linear`, §8). Superposition is valid only under linear kinetics. Drugs flagged non-linear (saturable elimination, e.g. phenytoin; auto-induction, e.g. carbamazepine) get **no curve and no trough projection** — instead an honest panel: "This medication doesn't follow simple curve maths, so a modelled level would mislead. Track your doses and talk to your clinician." Refusing to draw what we can't draw honestly is the conservative, correct posture — it strengthens §6.1, it does not strain it.
+
+**Reference `drugs` parameters (per route).** The engine reads, per route, from the `drugs` table (§8): kernel type (`kernel_by_route`); half-life (`half_life_hours`); **half-life range** (`half_life_range_hours`, low/high, for the uncertainty band); Tmax (`tmax_hours`); bioavailability; release duration (`release_duration_hours`, zero-order only); and any **secondary metabolites** (`metabolites`) with their own kernel, fraction, half-life and Tmax. Reference times are stored in **hours**; the engine works in a consistent unit internally.
+
+**Active metabolites.** Where a drug carries metabolite parameters (the schema already anticipates this), the engine models parent and metabolite as separate compartments and can render either or both. A parent-plus-metabolite curve is more complete and more honest than a single line; it is still illustrative.
+
+**What the chart shows.** Past 14 days + projected next 7, run from the chosen regimen: logged-dose markers; a "you are here" line; the projected trough as a quiet marker (never an alert or countdown); the **uncertainty band** (population half-life range — a "your body may vary" visual, never a therapeutic target); the **missed-dose shape** where the log has gaps (consequence of logged history, never a corrective amount); the **chosen-vs-prescribed overlay** (illustrative, never "better"); and, for new medications, an illustrative **time-to-steady-state** marker (general education).
+
+**Personal calibration (opt-in — see §4.8).** With ≥2 valid user-entered readings, the engine back-solves a personal terminal half-life: for two decline-phase readings, `k = ln(C₁/C₂) / (t₂ − t₁)`, `halfLife = ln(2)/k`, constrained to physiologically plausible bounds; implausible fits are rejected. Only the terminal half-life is fitted (absorption / Tmax stays from the reference). The calibrated curve is shown alongside the textbook curve, tagged "your personal estimate", and never described as a measurement. Calibration changes the picture, never the advice posture — it produces no dose.
+
+**Regimen explorer (user-driven — see §4.9).** Renders curve shapes for a schedule the user constructs. No ranking, no "optimum", no recommendation, no write-back to the live regimen.
+
+**Prohibited in this view (reaffirmed).** No red zones, no warning colouring, no "you should dose now" prompt, no corrective or catch-up dose amount, no "this regimen is better" judgement, and no automatic adjustment of any regimen based on our maths. The chart shows; the user decides.
 
 ### 5.8 Drug interaction checking
 
@@ -285,9 +324,12 @@ When the user changes the chosen regimen, the reminder schedule regenerates and 
 
 The product is positioned as a **wellness / general-purpose tool**, not a medical device. This is enforced through product, marketing, and store-listing language rules. These rules are not stylistic; they are the line between this product and a regulated medical device under FDA 21 CFR Part 820, the UK MHRA software-as-medical-device guidance, Health Canada's Medical Devices Regulations, and the equivalent regimes in Australia (TGA) and the EU (MDR).
 
+- **The information-vs-instruction line (the governing test).** The product presents information the user interprets and acts on with their clinician. It never makes or recommends a dosing or treatment decision, and never ranks or endorses one regimen over another. Every feature — including any added in future — must pass this test regardless of the words it uses. The phrase rules below are a lexical backstop; this principle is the real boundary.
 - **Never** use "treat", "treatment", "diagnose", "diagnosis", "cure", "prevent", or "prescribe" in user-facing copy. The user prescribes (with their doctor); we log.
 - **Never** use the phrase "medical advice" except in the negation: *"not medical advice"*.
 - **Always** describe the PK view as "illustrative", "based on textbook half-life", or "modelled" — never as "your actual concentration" or "your level".
+- **Calibration carve-out (the only place "your" is permitted for a curve):** a curve the user has explicitly calibrated to readings *they entered* (§4.8) may be called "your personal estimate". It must still never be called a measurement, a level, or a concentration, and must always carry the calibrated disclaimer (§4.4, step 8). The carve-out applies only to user-entered calibration, never to the textbook curve.
+- The regimen explorer (§4.9) never labels, ranks, or recommends a scenario. It shows shapes.
 - **Never** automatically adjust a regimen based on our calculations. The user changes their regimen; we recompute the schedule and chart in response.
 - **Always** present drug-interaction information from the curated source with severity and let the user act. We do not say "do not take these together"; we say "these are known to interact — discuss with your doctor or pharmacist".
 - **No** symptom checking, condition suggestion, or "what might be wrong" logic anywhere in the product.
@@ -301,6 +343,7 @@ The product is positioned as a **wellness / general-purpose tool**, not a medica
 
 - **System secrets** (the OpenRouter key, future feed / SMS keys) are encrypted at the application layer with AES-256-GCM using a single key from the `SECRET_ENCRYPTION_KEY` environment variable; the stored envelope is `<iv-hex>:<tag-hex>:<ciphertext-hex>`. The database only ever sees ciphertext plus a masked preview (`sk-or-v…wxyz`). This matches the inherited `lib/crypto.ts` / `lib/secrets.ts` pattern.
 - **Health data** is protected by Postgres / Supabase encryption at rest plus Row-Level Security bound to patient membership. It is **not** app-layer field-encrypted in the inherited pattern. If we decide the most sensitive fields (e.g. controlled-substance logs, mental-health medication names) warrant app-layer encryption with a key distinct from `SECRET_ENCRYPTION_KEY`, that is a **deliberate net-new addition** to scope, not something inherited — see §11.
+- **Calibration readings are sensitive health data.** `pk_calibrations` rows (§8) are patient-scoped, governed by the membership RLS predicate (§7), and respect the per-medication `is_private` flag. Because a reading can be as revealing as a controlled-substance log, calibration data is included in the flagged net-new decision on app-layer field encryption above; if we adopt app-layer encryption for sensitive health fields, calibration readings are in scope.
 - All data encrypted in transit (TLS 1.3).
 - **Authentication.** The inherited, working baseline is **email magic link** via Supabase Auth (middleware checks `supabase.auth.getUser()`, login is a magic-link form). Passkey / WebAuthn is the intended primary method but is **not yet implemented** in the codebase; treating it as built is a mistake. Doozy either ships on the magic-link baseline first and adds WebAuthn as a deliberate piece of work, or budgets WebAuthn explicitly. Biometric unlock on installed iOS is desirable once WebAuthn exists.
 - Original photos in a private bucket, accessible only via short-lived signed URLs; storage object keys are scoped by patient folder (see the membership caveat in §7).
@@ -341,7 +384,7 @@ The stack is inherited from the Numara codebase wherever it fits. The one struct
 | **Auth** | Supabase Auth. **Magic link is the implemented baseline**; WebAuthn is intended but unbuilt (§6.2). | Repo reality: `lib/supabase/middleware.ts` + a magic-link login page. No WebAuthn yet. |
 | **Reminders** | Web Push API for PWA users; **Twilio** SMS fallback for caregivers without the app. Schedule materialiser runs as a cron job. | Net-new. Twilio is a new dependency to flag. |
 | **Drug database** | Curated reference: RxNorm + openFDA + DDInter (v1). Daily sync to local `drugs` / `drug_interactions`. | Net-new. |
-| **Pharmacokinetic engine** | Deterministic TypeScript service. | Net-new. Not an LLM job. |
+| **Pharmacokinetic engine** | Deterministic TypeScript service: superposition engine + per-route kernel library (`exponential` / `bateman` / `zeroOrder`) + linearity gate + active-metabolite compartments + opt-in personal calibration (§5.7). | Net-new. Not an LLM job. Reads the `drugs` reference fields and `pk_calibrations`. |
 | **PDF generation** | **Puppeteer** server-side render of a styled React component. | Net-new dependency to flag. |
 | **Charting** | A charting library for the PK view (e.g. a lightweight SVG charting lib). | Net-new dependency to flag; pick the lightest option and justify it. |
 | **LLM gateway** | OpenRouter only, via `llmCall`. Keys in `system_secrets`, never in the runtime env beyond the bootstrap `SECRET_ENCRYPTION_KEY`. | Matches the repo exactly. |
@@ -352,7 +395,7 @@ The stack is inherited from the Numara codebase wherever it fits. The one struct
 
 ## 8. Data model (entities)
 
-The model is **patient-scoped from day one**, but unlike the inherited one-household-per-user shape, the patient ↔ user relationship is **many-to-many** via `patient_memberships` (see §7). Table names are snake_case plural per the codebase convention (`patients`, `patient_memberships`, `medications`, `prescribed_regimens`, `delivery_forms`, `chosen_regimens`, `dose_logs`, `dose_schedules`, `dose_reminders`, `tracked_fields`, `diary_entries`, `documents`, `exports`, `drugs`, `drug_interactions`); columns are snake_case; every mutable table has `created_at` / `updated_at timestamptz default now()` with a `set_updated_at()` trigger. The PascalCase labels below are conceptual entity names.
+The model is **patient-scoped from day one**, but unlike the inherited one-household-per-user shape, the patient ↔ user relationship is **many-to-many** via `patient_memberships` (see §7). Table names are snake_case plural per the codebase convention (`patients`, `patient_memberships`, `medications`, `prescribed_regimens`, `delivery_forms`, `chosen_regimens`, `dose_logs`, `dose_schedules`, `dose_reminders`, `tracked_fields`, `diary_entries`, `documents`, `exports`, `pk_calibrations`, `drugs`, `drug_interactions`); columns are snake_case; every mutable table has `created_at` / `updated_at timestamptz default now()` with a `set_updated_at()` trigger. The PascalCase labels below are conceptual entity names.
 
 ### Patient-scoped entities
 
@@ -372,12 +415,13 @@ The model is **patient-scoped from day one**, but unlike the inherited one-house
 | **DiaryEntry** | `id`, `patient_id`, `entry_at`, `field_values` (jsonb, keyed by `tracked_field_id`), `attached_dose_log_id` (nullable), `note`, `logged_by_user_id` |
 | **Document** | `id`, `patient_id` (scope FK), `storage_path` (unique), `file_name`, `mime_type`, `size_bytes` (≤ 26214400), `document_type` (`vial_photo` \| `prescription_scan` \| `patch_box` \| `pill_bottle` \| `lab_result` \| `other`), `linked_medication_id` (nullable), `uploaded_by`, `uploaded_at`, `extracted_json` (jsonb), `status` (`uploaded` \| `processing` \| `extracted` \| `failed`) |
 | **Export** | `id`, `patient_id`, `generated_by_user_id`, `date_range_start`, `date_range_end`, `medications_included` (jsonb array), `fields_included` (jsonb array), `output_storage_path`, `generated_at` |
+| **PkCalibration** | `id`, `patient_id` (scope FK, RLS via `patient_memberships`), `medication_id`, `value` (numeric), `unit`, `observed_at` (timestamptz), `note` (nullable), `logged_by_user_id`, `created_at`. **Net-new.** User-entered readings that calibrate the PK curve (§4.8, §5.7). Honours the medication's `is_private` flag for caregiver/viewer visibility (§5.6). The derived personal terminal half-life is computed from these rows at render time (`source = user_calibrated`) and **never** overwrites the reference `drugs` value. |
 
 ### Reference data (global, read-only to users)
 
 | Entity | Key fields |
 |---|---|
-| **Drug** | `id`, `rxnorm_id`, `canonical_name`, `atc_class`, `half_life_hours` (jsonb, keyed by route), `bioavailability` (jsonb, keyed by route, 0–1), `tmax_hours` (jsonb, keyed by route), `controlled_schedule` (nullable), `reference_data` (jsonb), `last_synced_at` |
+| **Drug** | `id`, `rxnorm_id`, `canonical_name`, `atc_class`, `half_life_hours` (jsonb, keyed by route), `half_life_range_hours` (jsonb, keyed by route → `[low, high]`, for the uncertainty band), `bioavailability` (jsonb, keyed by route, 0–1), `tmax_hours` (jsonb, keyed by route), `kernel_by_route` (jsonb, keyed by route → `exponential` \| `bateman` \| `zeroOrder`), `release_duration_hours` (jsonb, keyed by route — zero-order kernels only), `is_linear` (boolean — the linearity gate, §5.7), `nonlinear_reason` (text, nullable — shown when `is_linear = false`), `metabolites` (jsonb array of `{name, fraction, kernel, half_life_hours, tmax_hours}`), `controlled_schedule` (nullable), `reference_data` (jsonb), `last_synced_at` |
 | **DrugInteraction** | `id`, `drug_a_id`, `drug_b_id`, `severity` (`info` \| `caution` \| `serious`), `mechanism`, `reference_source` (e.g. `DDInter`, `openFDA`), `last_synced_at` |
 
 ### Admin / LLM-infrastructure entities (admin-only, see §14)
@@ -405,7 +449,7 @@ Global (not patient-scoped), readable only by `is_system_admin = true` via the S
 - **Calm, dense, monochrome with one accent.** ByZyB.ai palette: black `#000000` background, electric yellow `#F4EE35` accent, white / `#CCCCCC` body type. No celebratory animation when a dose is logged — health logging should feel matter-of-fact, never gamified. (The inherited code is monochrome with a single sparingly-used accent; keep that discipline, swap the accent to ByZyB yellow.)
 - **Numbers and times are the hero.** Large, tabular figures (`font-variant-numeric: tabular-nums`) for dose amounts and times. Right-aligned in lists. Units present but de-emphasised in display; prominent when entering or editing.
 - **The syringe visual is the product moment for injectables.** Treat it with deliberate craft: calibrated to the user's actual syringe spec, accurate volume rendering, clear "fill to this line" guidance. No clip-art.
-- **The half-life view is informational, not alarmist.** No red zones, no "danger" colouring, no "you should dose now" prompts. The curve, the trough, the time. Disclaimer inline.
+- **The half-life view is informational, not alarmist.** No red zones, no "danger" colouring, no "you should dose now" prompts. The curve, the uncertainty band, the trough, the time, the missed-dose shape, the chosen-vs-prescribed overlay — all illustrative. A user-calibrated curve (§4.8) is clearly tagged "your personal estimate" and sits alongside the textbook curve. The regimen explorer (§4.9) shows shapes and never ranks them. Disclaimer inline.
 - **No streak counters. No "X days in a row" gamification.** This is a diary, not a habit app.
 - **Staleness is visible without alarm.** A medication not logged against in a while is marked (the inherited amber-dot pattern works), but the tone is neutral ("last logged 4 days ago"), never accusatory.
 - **Privacy mode:** single-tap blur of all medication names and dose amounts for over-shoulder situations. Implement as global state, not per-component (inherited pattern).
@@ -435,6 +479,7 @@ Global (not patient-scoped), readable only by `is_system_admin = true` via the S
 
 - **Scoping-model mismatch with the inherited code.** The single biggest implementation risk. Numara's `current_household_id()` helper, its single-FK `users.household_id`, and its storage-folder RLS all assume one scope per user. Reusing them for Doozy would silently break multi-patient access. Mitigation: replace the helper with a membership predicate from the first migration; never default a `patient_id` column to a "current patient" function; carry the active patient in app session state; write the storage-RLS folder check against the membership set.
 - **Regulatory drift.** Feature creep can turn the diary into a medical device. Mitigation: language rules in §6.1 enforced at code review; every new feature checked against the wellness positioning before build; quarterly review against MHRA / FDA / Health Canada SaMD guidance.
+- **Personal calibration shifts the regulatory character (launch dependency).** Calibration (§4.8/§5.7) moves Doozy from generic illustration toward individualised modelling — the one v0.4 feature that could affect the software-as-medical-device determination. It is designed to stay a wellness tool (user-entered data, illustrative output, no measurement claim, no dose), but the determination is a legal one, not a design one. Mitigation: before calibration ships in any territory, the SaMD classification is reviewed with regulatory counsel for that territory (US FDA, UK MHRA, Health Canada, Australia TGA, EU MDR). This gates the **release of the calibration feature**, not the rest of v1 — the textbook engine, explorer, and all other features can ship ahead of it.
 - **Drug interaction false negatives.** A curated source can miss interactions. Mitigation: "not exhaustive — speak with your pharmacist" framing on every interaction display; uncovered free-text "other medications" field for the doctor PDF; the `extraction_deltas` table to spot weak fields/drugs.
 - **Caregiver permissions overreach.** A caregiver-by-default visibility model can be misused in coercive relationships. Mitigation: role distinction; per-medication `is_private` flag; owner can revoke at any time; audit log of caregiver views on private-eligible categories.
 - **Reminder fatigue.** Mitigation: smart consolidation; escalation only after a missed dose; per-medication mute; schedule defaults to the minimum cadence implied by the chosen regimen.
@@ -450,6 +495,8 @@ Global (not patient-scoped), readable only by `is_system_admin = true` via the S
 | How is patient data scoped — inherit `household_id` / `current_household_id()`? | **No. Membership-based.** Patient ↔ user is many-to-many via `patient_memberships`; RLS uses a membership predicate; the active patient lives in session state. The inherited single-scope helper does not port. |
 | Drug interactions — LLM-derived or curated source? | **Curated source as ground truth.** The LLM only renders curated records via `explain_interaction`; it never enumerates. |
 | Should the PK view ever say "you should take a dose now"? | **No.** Illustrative only. The user changes the regimen; we recompute. |
+| How is the PK engine structured? | **Superposition engine + per-route kernel library + linearity gate** (§5.7). Non-linear drugs (saturable, auto-inducing) are gated out of curve rendering rather than modelled wrongly. |
+| Personal calibration and the regimen explorer in v1? | **Yes, both — inside the §6.1 information-vs-instruction line.** Calibration fits a curve to user-entered readings (never a measurement, never a dose); the explorer renders user-constructed scenarios (never ranked or recommended). Calibration's *release* carries a per-territory SaMD review dependency (§11 Risks); the explorer does not. |
 | Should caregivers see everything by default? | **All non-private medications.** A per-medication `is_private` flag (owner-set) excludes specific medications regardless of role. |
 | Should diary fields have imposed defaults? | **No.** Onboarding suggests fields via `suggest_diary_fields`; the user picks. |
 | Single-user only, or multi-party data model? | **Multi-party from day one** (`patient_memberships`). v1 UI surfaces one active patient; a patient switcher arrives with caregiver invitations. |
@@ -487,7 +534,7 @@ Global (not patient-scoped), readable only by `is_system_admin = true` via the S
 8. **AI extraction — vials, with `extraction_deltas` logging.** `extract_vial` wired into the medication-add flow; image via `opts.images`; confidence + thumbnail + confirm UI; defensive JSON parse/validate. On confirm, write one `extraction_deltas` row per changed field (`llm_to_user`). The manual-with-verification-photo flow also lands here (`user_to_llm`).
 9. **AI extraction — prescriptions.** `extract_prescription` + `normalise_drug_name`. Delta logging continues across both flows.
 10. **Admin Extractions page (§14.7).** Aggregates over `extraction_deltas` (per field / drug / prompt version / model / direction). Drill-in with redacted "view source" (audit-logged). Admin annotation (`expected` vs `extraction_miss`).
-11. **Pharmacokinetic engine and visualisation.** Deterministic service; chart with permanent disclaimer; chosen-vs-prescribed overlay. (Charting dep flagged.)
+11. **Pharmacokinetic engine and visualisation.** Deterministic service: superposition engine + per-route kernel library (`exponential` / `bateman` / `zeroOrder`) + linearity gate + active-metabolite compartments. Chart with permanent disclaimer, uncertainty band, projected trough, missed-dose shape, chosen-vs-prescribed overlay, and time-to-steady-state for new meds. Then the **regimen explorer** (user-driven, no ranking) and **opt-in personal calibration** (`pk_calibrations`, terminal-half-life back-solve, "your personal estimate" tagging) — calibration's territory release is gated on the §11 SaMD review. (Charting dep flagged.)
 12. **Reminders engine.** Schedule generator; Web Push registration; Twilio SMS for caregivers without the app. (Deps flagged.)
 13. **Caregiver model UI.** Invite flow; `patient_memberships` management; role-based access; private-medication flag; patient switcher. (RLS already in place from step 1.)
 14. **Drug interaction display.** Pairwise check on medication add; `explain_interaction` renders the curated record.
@@ -602,7 +649,15 @@ No tests run against live OpenRouter, ever. Mock the provider at the `callOpenRo
 
 **`llmCall` fallback chain.** Force a primary failure → assert the call lands on fallback 1; force two failures → fallback 2; force three → the `{ ok: false, error, attempts }` result with the full attempt chain. Assert every attempt writes an `llm_call_logs` row with the correct `was_fallback` value.
 
-**Pharmacokinetic engine (§5.7).** A known dose history against a known half-life produces the expected concentration curve and projected trough. Cover the "missed dose, re-spread across the remainder of the period" case and the chosen-vs-prescribed overlay computation. This is the most correctness-sensitive deterministic code in the product — test it hard.
+**Pharmacokinetic engine (§5.7).** A known dose history against a known half-life produces the expected concentration curve and projected trough. Cover the "missed dose, re-spread across the remainder of the period" case and the chosen-vs-prescribed overlay computation. This is the most correctness-sensitive deterministic code in the product — test it hard. Specifically:
+- **Kernel correctness, per type.** Exponential, Bateman (Tmax-derived absorption), and zero-order kernels each reproduce known single-dose curves and superpose correctly over a known dose history.
+- **Linearity gate.** A drug flagged `is_linear = false` returns the honest no-curve panel and **no** trough projection — asserted, not merely styled.
+- **Active-metabolite modelling.** A drug with `metabolites` parameters produces parent and metabolite series with the expected shapes.
+- **Uncertainty band.** The shaded region matches `half_life_range_hours` bounds.
+- **Missed-dose shape.** A logged gap renders the expected dip; the engine never emits a corrective dose value in any field of the response.
+- **Calibration maths.** Two decline-phase readings back-solve the expected terminal half-life; implausible fits are rejected and the textbook curve is retained; only the terminal half-life moves (Tmax unchanged). `pk_calibrations` is patient-scoped and respects `is_private` under a direct query.
+- **Regimen explorer.** A user-constructed scenario renders a curve; the response contains no ranking, "better/optimum" flag, recommendation, or write-back to the live chosen regimen.
+- **The §6.1 line holds in code.** No PK endpoint returns a dose-to-take, a regimen endorsement, or a position-triggered directive — for any drug, linear or not, calibrated or not.
 
 **Defensive extraction parse (§5.2).** The JSON parser tolerates ```json fences and trailing prose, extracts the first `{`…`}`, and rejects invalid enum values (unknown route, unknown form type) rather than persisting them.
 
