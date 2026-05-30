@@ -1,6 +1,16 @@
 import type { NextConfig } from "next";
+import withSerwistInit from "@serwist/next";
 
-// PWA (Serwist) is deliberately deferred to build-sequence step 17.
+// PWA via Serwist (PRD §6.4, §13.17). Dependency: @serwist/next + serwist
+// (~50kB combined). Service worker generation + Next.js integration for
+// precaching and runtime caching. Alternative: manual SW (error-prone).
+
+const withSerwist = withSerwistInit({
+  swSrc: "app/sw.ts",
+  swDest: "public/sw.js",
+  disable: process.env.NODE_ENV === "development",
+});
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   experimental: {
@@ -12,4 +22,4 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withSerwist(nextConfig);

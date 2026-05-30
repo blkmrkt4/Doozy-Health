@@ -7,6 +7,7 @@ export const metadata: Metadata = {
   description:
     "A wellness diary tool for personal medication tracking and how you feel.",
   applicationName: "Doozy Health",
+  manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     title: "Doozy Health",

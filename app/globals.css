@@ -40,3 +40,24 @@ body {
 .tabular {
   font-variant-numeric: tabular-nums;
 }
+
+/* Privacy-mode blur (PRD §9). Applied to elements with .blur-private when
+   the body has .privacy-mode. Blurs medication names, dose amounts, and
+   diary values for over-shoulder situations. */
+.privacy-mode .blur-private {
+  filter: blur(8px);
+  user-select: none;
+  transition: filter 0.2s ease;
+}
+
+/* Staleness amber dot (PRD §9). Neutral marker for medications not
+   logged recently. Never accusatory. */
+.stale-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #d97706;
+  vertical-align: middle;
+  margin-right: 4px;
+}

@@ -7,6 +7,7 @@ import { logScheduledDose } from "@/app/medications/actions";
 import { acceptInvite, declineInvite } from "@/app/settings/caregivers/actions";
 import { formatRegimenSummary, relativeAge } from "@/lib/format";
 import { PatientSwitcher } from "@/app/_components/patient-switcher";
+import { PrivacyToggle } from "@/app/_components/privacy-toggle";
 
 type ChosenRow = {
   dose_amount: string;
@@ -184,6 +185,7 @@ export default async function DashboardPage() {
             <Link href="/diary" className="text-faint hover:text-muted">
               Diary
             </Link>
+            <PrivacyToggle />
             <Link href="/report" className="text-faint hover:text-muted">
               Export
             </Link>
@@ -283,7 +285,7 @@ export default async function DashboardPage() {
                     className="min-w-0 flex-1 transition-colors hover:opacity-80"
                   >
                     <p className="truncate text-base font-medium text-paper">
-                      {m.display_name}
+                      <span className="blur-private">{m.display_name}</span>
                       {m.is_private ? (
                         <span
                           className="ml-2 align-middle text-xs text-faint"
@@ -302,11 +304,16 @@ export default async function DashboardPage() {
                       ) : null}
                     </p>
                     {chosen ? (
-                      <p className="mt-0.5 tabular text-sm text-muted">
+                      <p className="mt-0.5 tabular text-sm text-muted blur-private">
                         {formatRegimenSummary(chosen)}
                       </p>
                     ) : null}
                     <p className="mt-0.5 text-xs text-faint">
+                      {/* Staleness dot: amber if not logged in 48+ hours (PRD §9).
+                          Neutral tone, never accusatory. */}
+                      {last && Date.now() - new Date(last).getTime() > 48 * 3_600_000 ? (
+                        <span className="stale-dot" title="Not logged recently" />
+                      ) : null}
                       {last ? `Last logged ${relativeAge(last)}` : "No doses logged yet"}
                     </p>
                   </Link>
