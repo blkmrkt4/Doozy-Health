@@ -204,7 +204,7 @@ export async function createMedication(formData: FormData) {
   }
 
   revalidatePath("/dashboard");
-  redirect(`/medications/${medId as string}`);
+  redirect(`/medications/${medId as string}?new=1`);
 }
 
 // ── Owner controls on the detail page ───────────────────────────────────────

@@ -32,6 +32,7 @@ import {
   SIGNED_URL_TTL_SECONDS,
 } from "@/lib/documents";
 import { LogDoseForm } from "./log-dose-form";
+import { SyringeVisual } from "@/app/medications/_components/syringe-visual";
 
 type Regimen = {
   dose_amount: string;
@@ -94,10 +95,10 @@ export default async function MedicationDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; new?: string }>;
 }) {
   const { id } = await params;
-  const { error: errorParam } = await searchParams;
+  const { error: errorParam, new: isNew } = await searchParams;
 
   const supabase = await createClient();
   const {
@@ -231,9 +232,17 @@ export default async function MedicationDetailPage({
         ) : null}
 
         {/* Drug interactions (PRD §5.8). Shows curated interaction records.
-            Framing is informational, never directive (§6.1). */}
+            Framing is informational, never directive (§6.1).
+            When ?new=1 (just added), show a prominent banner. */}
         {interactions.length > 0 ? (
           <section className="space-y-3">
+            {isNew ? (
+              <p className="rounded-md border border-yellow-800 bg-yellow-950/20 p-3 text-sm text-yellow-300">
+                This medication has known interactions with others you are
+                taking. Please review below and discuss with your doctor or
+                pharmacist.
+              </p>
+            ) : null}
             <h2 className="text-sm font-medium text-paper">
               Known interactions
             </h2>
@@ -264,12 +273,22 @@ export default async function MedicationDetailPage({
                 Taken now
               </button>
             </form>
+            {/* Calibrated syringe visual for injectables (PRD §4.3, §9) */}
+            {isInjectable && delivery?.concentration && delivery.concentration.amount ? (
+              <SyringeVisual
+                doseAmount={Number(chosen.dose_amount)}
+                concentrationAmount={delivery.concentration.amount}
+                concentrationPerVolume={delivery.concentration.per_volume ?? 1}
+                syringeCapacityMl={1} // default; real value from syringe_spec if available
+              />
+            ) : null}
             <LogDoseForm
               medicationId={med.id}
               defaultAmount={String(chosen.dose_amount)}
               defaultUnit={chosen.dose_unit}
               defaultRoute={chosen.route}
               isInjectable={isInjectable}
+              isPatch={delivery?.form_type === "patch"}
             />
           </section>
         ) : null}

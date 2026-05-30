@@ -194,6 +194,77 @@ export async function sendReminder(reminderId: string): Promise<boolean> {
   return success;
 }
 
+/**
+ * Check for escalation: if a sent reminder hasn't been acted on within the
+ * schedule's escalation_delay_min, notify the designated caregiver (§5.5).
+ * Called by the cron send endpoint after sending.
+ */
+export async function checkEscalations(): Promise<number> {
+  const admin = createAdminClient();
+  const now = Date.now();
+  let escalated = 0;
+
+  // Find sent reminders past their escalation window.
+  const { data: schedules } = await admin
+    .from("dose_schedules")
+    .select("id, medication_id, patient_id, escalation_delay_min, escalation_user_id")
+    .not("escalation_delay_min", "is", null)
+    .not("escalation_user_id", "is", null);
+
+  for (const schedule of schedules ?? []) {
+    const delayMs = (schedule.escalation_delay_min as number) * 60_000;
+    const cutoff = new Date(now - delayMs).toISOString();
+
+    // Find sent-but-unacted reminders past the escalation window.
+    const { data: overdue } = await admin
+      .from("dose_reminders")
+      .select("id, medication_id, due_at")
+      .eq("schedule_id", schedule.id)
+      .eq("status", "sent")
+      .lte("due_at", cutoff);
+
+    if (!overdue || overdue.length === 0) continue;
+
+    // Load medication name for the notification.
+    const { data: med } = await admin
+      .from("medications")
+      .select("display_name")
+      .eq("id", schedule.medication_id)
+      .single();
+    const medName = (med?.display_name as string) ?? "a medication";
+
+    // Notify the escalation caregiver via push (if subscribed).
+    const { data: sub } = await admin
+      .from("push_subscriptions")
+      .select("endpoint, p256dh, auth")
+      .eq("user_id", schedule.escalation_user_id)
+      .limit(1)
+      .maybeSingle();
+
+    if (sub) {
+      await sendPushNotification(
+        sub as unknown as PushSubscription,
+        {
+          title: "Dose not logged",
+          body: `${medName} was due and hasn't been logged yet.`,
+          url: `/medications/${schedule.medication_id}`,
+        }
+      );
+    }
+
+    // Mark these reminders as missed.
+    const overdueIds = overdue.map((r) => r.id as string);
+    await admin
+      .from("dose_reminders")
+      .update({ status: "missed" })
+      .in("id", overdueIds);
+
+    escalated += overdue.length;
+  }
+
+  return escalated;
+}
+
 // ── Action handling ────────────────────────────────────────────────────────
 
 /**

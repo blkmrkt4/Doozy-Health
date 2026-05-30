@@ -1,189 +1,87 @@
-"use client";
+import { notFound, redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+import { resolveParams } from "@/lib/pharmacokinetics";
+import { ExploreForm } from "./explore-form";
 
-import { useState } from "react";
-import Link from "next/link";
-import { PkChart } from "@/app/medications/[id]/timeline/pk-chart";
-import {
-  computeConcentration,
-  generateScheduledDoses,
-  type PkParams,
-  type PkTimeSeries,
-} from "@/lib/pharmacokinetics";
+// Regimen explorer (PRD §4.9, §5.7). Server component loads the drug's
+// actual PK params, client form lets the user construct hypothetical
+// regimens and see the curve shape. No ranking, no recommendation.
 
-// Regimen explorer (PRD §4.9, §5.7). A sandbox for the user to see the
-// shape of a schedule they're considering. Like a calculator, not an adviser.
-// No ranking, no "better", no recommendation, no write-back.
-
-const MS_PER_HOUR = 3_600_000;
-const DAY_MS = 24 * MS_PER_HOUR;
-
-const inputCls =
-  "block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent";
-
-export default function ExplorePage({
-  params: paramsPromise,
+export default async function ExplorePage({
+  params,
 }: {
   params: Promise<{ id: string }>;
 }) {
-  // Since this is a client component, we need local state for the explorer.
-  // PK params would normally come from the server — for the explorer we use
-  // user-entered values or defaults.
-  const [doseAmount, setDoseAmount] = useState("100");
-  const [intervalDays, setIntervalDays] = useState("7");
-  const [halfLife, setHalfLife] = useState("192");
-  const [bioavailability, setBioavailability] = useState("1.0");
-  const [tmax, setTmax] = useState("96");
-  const [series, setSeries] = useState<PkTimeSeries | null>(null);
+  const { id: medicationId } = await params;
 
-  function compute() {
-    const amount = Number(doseAmount);
-    const interval = Number(intervalDays);
-    const hl = Number(halfLife);
-    const bio = Number(bioavailability);
-    const tm = Number(tmax);
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
 
-    if (
-      !Number.isFinite(amount) || amount <= 0 ||
-      !Number.isFinite(interval) || interval <= 0 ||
-      !Number.isFinite(hl) || hl <= 0 ||
-      !Number.isFinite(bio) || bio <= 0 || bio > 1 ||
-      !Number.isFinite(tm) || tm <= 0
-    ) {
-      return;
+  const { data: med } = await supabase
+    .from("medications")
+    .select("id, display_name, canonical_drug_id")
+    .eq("id", medicationId)
+    .single();
+  if (!med) notFound();
+
+  // Load chosen regimen for defaults.
+  const { data: chosen } = await supabase
+    .from("chosen_regimens")
+    .select("dose_amount, dose_unit, route, frequency")
+    .eq("medication_id", medicationId)
+    .eq("active", true)
+    .single();
+
+  // Load the drug's PK params if available.
+  let defaults = {
+    doseAmount: chosen?.dose_amount ? String(chosen.dose_amount) : "100",
+    intervalDays: "7",
+    halfLife: "192",
+    bioavailability: "1.0",
+    tmax: "96",
+    kernel: "bateman" as string,
+  };
+
+  if (med.canonical_drug_id && chosen?.route) {
+    const { data: drug } = await supabase
+      .from("drugs")
+      .select(
+        "half_life_hours, bioavailability, tmax_hours, kernel_by_route"
+      )
+      .eq("id", med.canonical_drug_id)
+      .single();
+
+    if (drug) {
+      const params = resolveParams(
+        drug as unknown as {
+          half_life_hours: Record<string, number>;
+          bioavailability?: Record<string, number>;
+          tmax_hours?: Record<string, number>;
+          kernel_by_route?: Record<string, string>;
+        },
+        chosen.route as string
+      );
+      if (params) {
+        defaults = {
+          doseAmount: chosen.dose_amount ? String(chosen.dose_amount) : "100",
+          intervalDays: "7",
+          halfLife: String(params.halfLifeHours),
+          bioavailability: String(params.bioavailability),
+          tmax: String(params.tmaxHours),
+          kernel: params.kernel,
+        };
+      }
     }
-
-    const now = Date.now();
-    const rangeStart = now - 14 * DAY_MS;
-    const rangeEnd = now + 7 * DAY_MS;
-
-    const params: PkParams = {
-      halfLifeHours: hl,
-      bioavailability: bio,
-      tmaxHours: tm,
-      kernel: "bateman",
-      isLinear: true,
-    };
-
-    const doses = generateScheduledDoses(
-      { type: "every", interval, unit: "day" },
-      amount,
-      rangeStart,
-      rangeEnd
-    );
-
-    const result = computeConcentration(doses, params, rangeStart, rangeEnd, now);
-    setSeries(result);
   }
 
   return (
-    <div className="min-h-full">
-      <header className="border-b border-line">
-        <div className="mx-auto flex max-w-2xl items-center px-6 py-4">
-          <span className="text-sm text-faint">
-            ← <a href="javascript:history.back()" className="hover:text-muted">Back to timeline</a>
-          </span>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-2xl px-6 py-10 space-y-6">
-        <h1 className="text-xl font-medium tracking-tight">
-          Explore a regimen
-        </h1>
-        <p className="text-sm text-faint">
-          See the shape of a dosing schedule you are considering. This is a
-          calculator, not an adviser — it shows curve shapes only and never
-          recommends or ranks a regimen.
-        </p>
-
-        <section className="rounded-md border border-line p-4 space-y-4">
-          <h2 className="text-sm font-medium text-paper">
-            Hypothetical regimen
-          </h2>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div>
-              <label className="block text-sm text-muted">Dose amount</label>
-              <input
-                type="number"
-                step="any"
-                value={doseAmount}
-                onChange={(e) => setDoseAmount(e.target.value)}
-                className={`${inputCls} mt-1 tabular`}
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-muted">
-                Every N days
-              </label>
-              <input
-                type="number"
-                step="any"
-                value={intervalDays}
-                onChange={(e) => setIntervalDays(e.target.value)}
-                className={`${inputCls} mt-1 tabular`}
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-muted">
-                Half-life (hours)
-              </label>
-              <input
-                type="number"
-                step="any"
-                value={halfLife}
-                onChange={(e) => setHalfLife(e.target.value)}
-                className={`${inputCls} mt-1 tabular`}
-              />
-            </div>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className="block text-sm text-muted">
-                Bioavailability (0–1)
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                max="1"
-                value={bioavailability}
-                onChange={(e) => setBioavailability(e.target.value)}
-                className={`${inputCls} mt-1 tabular`}
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-muted">
-                Tmax (hours)
-              </label>
-              <input
-                type="number"
-                step="any"
-                value={tmax}
-                onChange={(e) => setTmax(e.target.value)}
-                className={`${inputCls} mt-1 tabular`}
-              />
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={compute}
-            className="rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-ink transition-opacity hover:opacity-90"
-          >
-            Render curve
-          </button>
-        </section>
-
-        {series ? (
-          <div className="space-y-4">
-            <PkChart series={series} />
-            <p className="rounded-md border border-line bg-surface p-3 text-xs text-faint">
-              This is an illustrative shape, not a prediction. It does not
-              recommend or endorse any regimen. Discuss changes with your
-              clinician.
-            </p>
-          </div>
-        ) : null}
-      </main>
-    </div>
+    <ExploreForm
+      medicationId={medicationId}
+      medicationName={med.display_name}
+      defaults={defaults}
+    />
   );
 }

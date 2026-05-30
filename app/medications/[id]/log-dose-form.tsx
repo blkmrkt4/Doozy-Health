@@ -19,12 +19,14 @@ export function LogDoseForm({
   defaultUnit,
   defaultRoute,
   isInjectable,
+  isPatch = false,
 }: {
   medicationId: string;
   defaultAmount: string;
   defaultUnit: string;
   defaultRoute: string;
   isInjectable: boolean;
+  isPatch?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [eventType, setEventType] = useState<EventType>("taken");
@@ -107,6 +109,27 @@ export function LogDoseForm({
                 className={inputCls}
               />
             </label>
+          ) : null}
+          {isPatch ? (
+            <>
+              <label className={labelCls}>
+                Placement (optional)
+                <input
+                  type="text"
+                  name="site"
+                  placeholder="e.g. lower abdomen, left"
+                  className={inputCls}
+                />
+              </label>
+              <label className={labelCls}>
+                Expected removal
+                <input
+                  type="datetime-local"
+                  name="expected_removal"
+                  className={inputCls}
+                />
+              </label>
+            </>
           ) : null}
         </>
       ) : (

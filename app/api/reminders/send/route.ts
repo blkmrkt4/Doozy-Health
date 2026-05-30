@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { sendReminder } from "@/lib/reminders";
+import { sendReminder, checkEscalations } from "@/lib/reminders";
 
 // Cron endpoint: send all pending reminders whose due_at has passed.
 // Protected by a cron secret. Called by an external cron service.
@@ -38,5 +38,9 @@ export async function POST(req: NextRequest) {
     else failed++;
   }
 
-  return NextResponse.json({ sent, failed });
+  // Check for escalations: sent reminders past the escalation window
+  // that haven't been acted on → notify the designated caregiver (§5.5).
+  const escalated = await checkEscalations();
+
+  return NextResponse.json({ sent, failed, escalated });
 }
