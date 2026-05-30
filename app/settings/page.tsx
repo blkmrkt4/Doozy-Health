@@ -34,16 +34,30 @@ export default async function SettingsPage() {
 
         <div className="mt-6 space-y-3">
           {active.role === "owner" ? (
-            <Link
-              href="/settings/caregivers"
-              className="block rounded-md border border-line p-4 hover:border-muted"
-            >
-              <h2 className="text-sm font-medium text-paper">Caregivers</h2>
-              <p className="mt-1 text-xs text-faint">
-                Invite caregivers and viewers, manage access to{" "}
-                {active.name}&rsquo;s medications.
-              </p>
-            </Link>
+            <>
+              <Link
+                href="/settings/caregivers"
+                className="block rounded-md border border-line p-4 hover:border-muted"
+              >
+                <h2 className="text-sm font-medium text-paper">Caregivers</h2>
+                <p className="mt-1 text-xs text-faint">
+                  Invite caregivers and viewers, manage access to{" "}
+                  {active.name}&rsquo;s medications.
+                </p>
+              </Link>
+              <Link
+                href="/settings/tracking"
+                className="block rounded-md border border-line p-4 hover:border-muted"
+              >
+                <h2 className="text-sm font-medium text-paper">
+                  Tracking fields
+                </h2>
+                <p className="mt-1 text-xs text-faint">
+                  Configure what to track alongside doses — mood, sleep,
+                  symptoms.
+                </p>
+              </Link>
+            </>
           ) : null}
         </div>
       </main>

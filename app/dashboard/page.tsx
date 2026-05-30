@@ -181,6 +181,9 @@ export default async function DashboardPage() {
             ) : null}
           </div>
           <div className="flex items-center gap-3 text-sm">
+            <Link href="/diary" className="text-faint hover:text-muted">
+              Diary
+            </Link>
             <Link href="/settings" className="text-faint hover:text-muted">
               Settings
             </Link>
