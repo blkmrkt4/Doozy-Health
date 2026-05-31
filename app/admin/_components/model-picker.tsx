@@ -102,12 +102,12 @@ export function ModelPicker({
   const selectedModel = models.find((m) => m.slug === selected);
 
   return (
-    <div className="space-y-1">
+    <div className="relative space-y-1">
       <label className="block text-sm text-muted">{label}</label>
       <input type="hidden" name={name} value={selected} />
 
       {/* Selected model display */}
-      {selectedModel ? (
+      {selectedModel && !open ? (
         <div className="flex items-center gap-2 rounded-md border border-line bg-surface px-3 py-2">
           <span className="flex-1 truncate text-sm text-paper">
             {selectedModel.name}
@@ -115,16 +115,13 @@ export function ModelPicker({
           <span className="text-xs text-faint">{selectedModel.provider}</span>
           <button
             type="button"
-            onClick={() => {
-              if (!required) setSelected("");
-              setOpen(true);
-            }}
+            onClick={() => setOpen(true)}
             className="text-xs text-muted hover:text-paper"
           >
-            {required ? "Change" : "Clear"}
+            Change
           </button>
         </div>
-      ) : (
+      ) : !open ? (
         <button
           type="button"
           onClick={() => setOpen(true)}
@@ -132,11 +129,11 @@ export function ModelPicker({
         >
           Select a model...
         </button>
-      )}
+      ) : null}
 
       {/* Dropdown */}
       {open && (
-        <div className="rounded-md border border-line bg-ink">
+        <div className="absolute left-0 right-0 top-full z-20 mt-1 rounded-md border border-line bg-ink shadow-lg">
           {/* Search + sort controls */}
           <div className="flex gap-2 border-b border-line p-2">
             <input

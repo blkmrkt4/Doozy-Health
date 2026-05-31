@@ -200,6 +200,20 @@ export async function extractVial(
     return { ok: false, error: result.error };
   }
 
+  // Check for document type mismatch (e.g. prescription sent as vial photo).
+  const rawObjVial = extractJson(result.text);
+  if (rawObjVial && rawObjVial.document_type_mismatch === true) {
+    const message = String(
+      rawObjVial.message ??
+        "This looks like a prescription, not a vial or package label. Try selecting 'Prescription' instead."
+    );
+    await admin
+      .from("documents")
+      .update({ status: "failed" })
+      .eq("id", documentId);
+    return { ok: false, error: message };
+  }
+
   const extraction = parseVialExtraction(result.text);
   if (!extraction) {
     await admin
@@ -271,6 +285,20 @@ export async function extractPrescription(
       .update({ status: "failed" })
       .eq("id", documentId);
     return { ok: false, error: result.error };
+  }
+
+  // Check for document type mismatch (e.g. vial photo sent as prescription).
+  const rawObj = extractJson(result.text);
+  if (rawObj && rawObj.document_type_mismatch === true) {
+    const message = String(
+      rawObj.message ??
+        "This looks like a medication label, not a prescription. It shows the concentration and packaging details, but not a specific dosage prescribed for you. Try selecting 'Vial / package' instead."
+    );
+    await admin
+      .from("documents")
+      .update({ status: "failed" })
+      .eq("id", documentId);
+    return { ok: false, error: message };
   }
 
   const extraction = parsePrescriptionExtraction(result.text);

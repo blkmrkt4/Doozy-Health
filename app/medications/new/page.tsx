@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getActivePatient } from "@/lib/active-patient";
 import { MedicationForm } from "./medication-form";
-import { uploadAndExtract } from "@/app/medications/actions";
+import { ScanForm } from "./scan-form";
 
 export default async function NewMedicationPage({
   searchParams,
@@ -46,47 +46,7 @@ export default async function NewMedicationPage({
               </p>
             ) : null}
 
-            {/* ── Photo-first path (PRD §5.2.1, §13.8–9) ────────── */}
-            <section className="mt-6 rounded-md border border-line p-4 space-y-3">
-              <h2 className="text-sm font-medium text-paper">
-                Scan a photo
-              </h2>
-              <p className="text-xs text-faint">
-                Take a photo of a vial, package, or prescription and we will
-                extract the details for you to review.
-              </p>
-              <form action={uploadAndExtract} className="space-y-3">
-                <div className="flex gap-3">
-                  <label className="block text-sm text-muted">
-                    Type
-                    <select
-                      name="document_type"
-                      defaultValue="vial_photo"
-                      className="mt-1 block rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent"
-                    >
-                      <option value="vial_photo">Vial / package</option>
-                      <option value="prescription_scan">Prescription</option>
-                    </select>
-                  </label>
-                </div>
-                <div className="flex items-end gap-3">
-                  <input
-                    type="file"
-                    name="photo"
-                    accept="image/jpeg,image/png,image/heic,image/heif"
-                    capture="environment"
-                    required
-                    className="flex-1 text-sm text-muted file:mr-3 file:rounded-md file:border file:border-line file:bg-surface file:px-3 file:py-1.5 file:text-xs file:text-muted"
-                  />
-                  <button
-                    type="submit"
-                    className="shrink-0 rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-ink transition-opacity hover:opacity-90"
-                  >
-                    Extract
-                  </button>
-                </div>
-              </form>
-            </section>
+            <ScanForm />
 
             {/* ── Divider ───────────────────────────────────────── */}
             <div className="relative my-8">

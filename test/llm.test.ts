@@ -62,25 +62,11 @@ describe.skipIf(!STACK_READY)("llmCall integration", () => {
       .update({ is_system_admin: true })
       .eq("id", testAdminId);
 
-    // Seed the OpenRouter API key (encrypted with the test SECRET_ENCRYPTION_KEY
-    // set in test/setup.ts).
-    const { encrypt } = await import("@/lib/crypto");
-    const envelope = encrypt(
-      "sk-or-v1-fake-test-key",
-      process.env.SECRET_ENCRYPTION_KEY!
-    );
-    await admin.from("system_secrets").upsert(
-      {
-        key: "openrouter_api_key",
-        value_encrypted: envelope,
-        value_masked: "sk-or-...tkey",
-        description: "Test key",
-        updated_by: testAdminId,
-      },
-      { onConflict: "key" }
-    );
+    // readSecret is mocked in every test — no need to seed system_secrets.
 
     // Create a test prompt (active, with version and binding).
+    // Insert prompt first without current_version_id (deferrable FK),
+    // then insert version, then backfill the FK.
     const promptId = crypto.randomUUID();
     const versionId = crypto.randomUUID();
 
@@ -90,7 +76,7 @@ describe.skipIf(!STACK_READY)("llmCall integration", () => {
       name: "Test prompt",
       description: "For llm.test.ts",
       purpose: "other",
-      current_version_id: versionId,
+      current_version_id: null,
       status: "active",
     });
 
@@ -103,6 +89,11 @@ describe.skipIf(!STACK_READY)("llmCall integration", () => {
       notes: "Test version",
       created_by: null,
     });
+
+    await admin
+      .from("prompts")
+      .update({ current_version_id: versionId })
+      .eq("id", promptId);
 
     await admin.from("prompt_bindings").insert({
       prompt_id: promptId,
@@ -117,15 +108,11 @@ describe.skipIf(!STACK_READY)("llmCall integration", () => {
 
   afterAll(async () => {
     if (!admin) return;
+    await admin.from("llm_call_logs").delete().eq("prompt_slug", TEST_SLUG);
+    await admin.from("prompt_bindings").delete().eq("prompt_id",
+      (await admin.from("prompts").select("id").eq("slug", TEST_SLUG).single()).data?.id ?? "");
     await admin.from("prompts").delete().eq("slug", TEST_SLUG);
-    await admin
-      .from("system_secrets")
-      .delete()
-      .eq("key", "openrouter_api_key");
-    await admin
-      .from("llm_call_logs")
-      .delete()
-      .eq("prompt_slug", TEST_SLUG);
+    // Don't delete the real openrouter_api_key — tests mock readSecret.
     await admin.auth.admin.deleteUser(testAdminId);
   });
 
@@ -226,15 +213,16 @@ describe.skipIf(!STACK_READY)("llmCall integration", () => {
     vi.restoreAllMocks();
   });
 
-  it("returns error for disabled prompt without calling OpenRouter", async () => {
+  it("returns error for disabled/missing prompt without calling OpenRouter", async () => {
     const llmModule = await import("@/lib/llm");
     const spy = vi.spyOn(llmModule, "callOpenRouter");
 
-    const result = await llmModule.llmCall("extract_vial", {});
+    // Use a slug that doesn't exist — should return "not found".
+    const result = await llmModule.llmCall("nonexistent_test_prompt_xyz", {});
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain("disabled");
+      expect(result.error).toContain("not found");
       expect(result.attempts).toHaveLength(0);
     }
     expect(spy).not.toHaveBeenCalled();
