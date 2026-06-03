@@ -1,31 +1,65 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { uploadAndExtract } from "@/app/medications/actions";
 
-// Scan form with smart UX: Extract button opens file picker if no file
-// chosen, shows a loading animation while the LLM processes, and submits
-// when a file is ready.
+// Scan form: choosing a photo immediately uploads and extracts — one tap, no
+// separate button. An animated beaker fills while the LLM processes.
+
+/** A redirect thrown by a server action carries a NEXT_REDIRECT digest; it must
+ *  be re-thrown so the framework can navigate, not swallowed as a failure. */
+function isRedirectError(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "digest" in err &&
+    typeof (err as { digest?: unknown }).digest === "string" &&
+    (err as { digest: string }).digest.startsWith("NEXT_REDIRECT")
+  );
+}
 
 export function ScanForm() {
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [hasFile, setHasFile] = useState(false);
+  const router = useRouter();
+  const formRef = useRef<HTMLFormElement>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  function handleExtractClick() {
-    if (!hasFile) {
-      // No file selected — open the file picker.
-      fileRef.current?.click();
+  function handlePickerOpen() {
+    // Starting a new scan should clear any leftover message from the previous
+    // attempt: the inline one (client state) and the top-of-page one (the
+    // server-rendered ?error= param), so a stale notice doesn't linger.
+    setError(null);
+    router.replace("/medications/new");
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !formRef.current) {
+      setFileName(null);
       return;
     }
-    // File is selected — submit the form.
-    const form = fileRef.current?.closest("form");
-    if (form) {
-      startTransition(() => {
-        const fd = new FormData(form);
-        uploadAndExtract(fd);
-      });
-    }
+    setFileName(file.name);
+    setError(null);
+
+    // Snapshot the form data now (the form unmounts once the beaker shows),
+    // then await the action so the pending state — and the beaker — stay up
+    // for the whole upload + extraction, and its redirect actually applies.
+    const fd = new FormData(formRef.current);
+    startTransition(async () => {
+      try {
+        await uploadAndExtract(fd);
+      } catch (err) {
+        // A successful or handled run ends in a redirect (the framework
+        // navigates — not caught here). This only fires for an unexpected
+        // throw, which would otherwise leave the beaker vanishing in silence.
+        if (isRedirectError(err)) throw err;
+        setError(
+          "Something went wrong starting the scan. Please try again, or enter the details manually below."
+        );
+      }
+    });
   }
 
   return (
@@ -39,7 +73,7 @@ export function ScanForm() {
       {isPending ? (
         <ExtractingIndicator />
       ) : (
-        <form action={uploadAndExtract} className="space-y-3">
+        <form ref={formRef} action={uploadAndExtract} className="space-y-3">
           <div className="flex gap-3">
             <label className="block text-sm text-muted">
               Type
@@ -53,24 +87,31 @@ export function ScanForm() {
               </select>
             </label>
           </div>
-          <div className="flex items-end gap-3">
+
+          {/* File input styled via the label — choosing a photo starts
+              extraction immediately, so this is the only control needed. */}
+          <label className="block cursor-pointer rounded-md border border-dashed border-line bg-surface px-3 py-2.5 text-center text-sm transition-colors hover:border-muted">
             <input
-              ref={fileRef}
               type="file"
               name="photo"
               accept="image/jpeg,image/png,image/heic,image/heif"
               capture="environment"
-              onChange={() => setHasFile(Boolean(fileRef.current?.files?.length))}
-              className="flex-1 text-sm text-muted file:mr-3 file:rounded-md file:border file:border-line file:bg-surface file:px-3 file:py-1.5 file:text-xs file:text-muted"
+              onClick={handlePickerOpen}
+              onChange={handleFileChange}
+              className="hidden"
             />
-            <button
-              type="button"
-              onClick={handleExtractClick}
-              className="shrink-0 rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-ink transition-opacity hover:opacity-90"
-            >
-              {hasFile ? "Extract" : "Choose photo"}
-            </button>
-          </div>
+            {fileName ? (
+              <span className="text-paper">{fileName}</span>
+            ) : (
+              <span className="text-faint">Tap to choose a photo — extracts automatically</span>
+            )}
+          </label>
+
+          {error ? (
+            <p className="rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">
+              {error}
+            </p>
+          ) : null}
         </form>
       )}
     </section>
@@ -81,10 +122,8 @@ export function ScanForm() {
 function ExtractingIndicator() {
   return (
     <div className="flex flex-col items-center gap-4 py-8">
-      {/* SVG beaker with filling animation */}
       <div className="relative">
         <svg width="64" height="80" viewBox="0 0 64 80" className="overflow-visible">
-          {/* Beaker outline */}
           <path
             d="M 18 10 L 18 30 L 8 65 Q 6 72 12 75 L 52 75 Q 58 72 56 65 L 46 30 L 46 10"
             fill="none"
@@ -93,32 +132,13 @@ function ExtractingIndicator() {
             strokeLinecap="round"
             strokeLinejoin="round"
           />
-          {/* Beaker rim */}
           <line x1="14" y1="10" x2="50" y2="10" stroke="#555555" strokeWidth="2" strokeLinecap="round" />
-
-          {/* Filling liquid — animated */}
           <clipPath id="beaker-clip">
             <path d="M 18 30 L 8 65 Q 6 72 12 75 L 52 75 Q 58 72 56 65 L 46 30 Z" />
           </clipPath>
-          <rect
-            x="6"
-            y="75"
-            width="52"
-            height="50"
-            fill="#F4EE35"
-            opacity="0.3"
-            clipPath="url(#beaker-clip)"
-          >
-            <animate
-              attributeName="y"
-              from="75"
-              to="28"
-              dur="3s"
-              repeatCount="indefinite"
-            />
+          <rect x="6" y="75" width="52" height="50" fill="#F4EE35" opacity="0.3" clipPath="url(#beaker-clip)">
+            <animate attributeName="y" from="75" to="28" dur="3s" repeatCount="indefinite" />
           </rect>
-
-          {/* Bubbles */}
           <circle cx="28" cy="60" r="2" fill="#F4EE35" opacity="0.5">
             <animate attributeName="cy" from="65" to="35" dur="1.8s" repeatCount="indefinite" />
             <animate attributeName="opacity" from="0.6" to="0" dur="1.8s" repeatCount="indefinite" />

@@ -1,6 +1,22 @@
 import "server-only";
 import { readSecret } from "@/lib/secrets";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logError, logWarn } from "@/lib/log";
+import {
+  callOpenRouter,
+  type ChatMessage,
+  type ContentPart,
+} from "@/lib/openrouter";
+
+// Re-export the transport + its types so existing `@/lib/llm` importers keep
+// working. callOpenRouter itself now lives in lib/openrouter.ts so it is a real
+// module boundary that tests can mock (PRD §15).
+export {
+  callOpenRouter,
+  type ChatMessage,
+  type ContentPart,
+  type OpenRouterResult,
+} from "@/lib/openrouter";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -19,15 +35,6 @@ export type LlmCallOpts = {
   actorId?: string;
 };
 
-export type ChatMessage = {
-  role: "user" | "assistant" | "system";
-  content: string | ContentPart[];
-};
-
-export type ContentPart =
-  | { type: "text"; text: string }
-  | { type: "image_url"; image_url: { url: string } };
-
 type AttemptLog = {
   model: string;
   wasFallback: 0 | 1 | 2;
@@ -39,13 +46,9 @@ export type LlmCallResult =
   | { ok: true; text: string; modelUsed: string; wasFallback: 0 | 1 | 2 }
   | { ok: false; error: string; attempts: AttemptLog[] };
 
-export type OpenRouterResult = {
-  text: string;
-  inputTokens: number;
-  outputTokens: number;
-};
-
-// Prompt binding shape (matches the prompt_bindings table).
+// Prompt binding shape (matches the prompt_bindings table). Its temperature /
+// max_tokens / response_format / json_schema fields satisfy the transport's
+// OpenRouterCallConfig structurally, so a full binding can be passed through.
 type PromptBinding = {
   primary_model_slug: string;
   fallback_1_model_slug: string | null;
@@ -55,76 +58,6 @@ type PromptBinding = {
   response_format: "text" | "json";
   json_schema: unknown;
 };
-
-// ── callOpenRouter (the mock boundary for tests — PRD §15) ─────────────────
-
-/**
- * Low-level HTTP call to OpenRouter /api/v1/chat/completions.
- * Exported so tests can mock at this boundary. App code should never call
- * this directly — use llmCall instead.
- */
-export async function callOpenRouter(
-  apiKey: string,
-  model: string,
-  messages: ChatMessage[],
-  binding: Pick<PromptBinding, "temperature" | "max_tokens" | "response_format" | "json_schema">,
-  opts?: { timeoutMs?: number }
-): Promise<OpenRouterResult> {
-  const body: Record<string, unknown> = {
-    model,
-    messages,
-    temperature: Number(binding.temperature),
-    max_tokens: binding.max_tokens,
-  };
-
-  if (binding.response_format === "json") {
-    body.response_format = { type: "json_object" };
-    if (binding.json_schema) {
-      body.response_format = {
-        type: "json_schema",
-        json_schema: binding.json_schema,
-      };
-    }
-  }
-
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "https://doozy.health",
-      "X-Title": "Doozy Health",
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(opts?.timeoutMs ?? 30_000),
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "(unreadable)");
-    throw new Error(`OpenRouter ${res.status}: ${text}`);
-  }
-
-  const json = (await res.json()) as {
-    choices?: { message?: { content?: string } }[];
-    usage?: { prompt_tokens?: number; completion_tokens?: number };
-    error?: { message?: string };
-  };
-
-  if (json.error?.message) {
-    throw new Error(`OpenRouter error: ${json.error.message}`);
-  }
-
-  const text = json.choices?.[0]?.message?.content ?? "";
-  if (!text) {
-    throw new Error("OpenRouter returned an empty response.");
-  }
-
-  return {
-    text,
-    inputTokens: json.usage?.prompt_tokens ?? 0,
-    outputTokens: json.usage?.completion_tokens ?? 0,
-  };
-}
 
 // ── Template rendering ─────────────────────────────────────────────────────
 
@@ -282,7 +215,14 @@ export async function llmCall(
   let apiKey: string;
   try {
     apiKey = await readSecret("openrouter_api_key");
-  } catch {
+  } catch (err) {
+    // The single most common silent failure: no key in system_secrets. Make it
+    // loud in the server log (slug only — never the vars/images, which carry
+    // health data) so it is diagnosable instead of a blank screen.
+    logError("llm", "OpenRouter API key not configured in system_secrets", err, {
+      promptSlug,
+      hint: "seed it via: OPENROUTER_BOOTSTRAP_KEY=... npm run seed:key",
+    });
     return {
       ok: false,
       error: "OpenRouter API key not configured.",
@@ -350,6 +290,14 @@ export async function llmCall(
       });
     }
   }
+
+  // Every model in the chain failed. Log the chain + per-model causes (model
+  // slugs and error strings only — no vars/images) so the terminal shows why.
+  logWarn("llm", "All models in the fallback chain failed", {
+    promptSlug,
+    modelsTried: attempts.map((a) => a.model).join(" → "),
+    lastError: attempts[attempts.length - 1]?.error ?? "unknown",
+  });
 
   return { ok: false, error: "All models failed.", attempts };
 }

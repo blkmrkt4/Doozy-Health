@@ -1,6 +1,7 @@
 import "server-only";
 import { llmCall } from "@/lib/llm";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logWarn } from "@/lib/log";
 import type { LlmConfidence } from "@/lib/types";
 
 // Vial/packaging extraction service (PRD §5.2, §13.8).
@@ -24,6 +25,9 @@ export type VialExtraction = {
   concentration_per_volume: ExtractedField<number | null>;
   volume_ml: ExtractedField<number | null>;
   route: ExtractedField;
+  // Free-text dosing instructions printed on a dispensed label, e.g.
+  // "Take 1 tablet by mouth every morning". Empty for bare manufacturer vials.
+  directions: ExtractedField;
   expiry_date: ExtractedField;
   batch: ExtractedField;
   manufacturer: ExtractedField;
@@ -45,7 +49,10 @@ export type ExtractionType = "vial" | "prescription";
 export type ExtractionResult =
   | { ok: true; extraction: VialExtraction; type: "vial"; modelUsed: string; promptVersionId: string }
   | { ok: true; extraction: PrescriptionExtraction; type: "prescription"; modelUsed: string; promptVersionId: string }
-  | { ok: false; error: string };
+  // typeMismatch flags "this is actually the other document type" so the caller
+  // can transparently re-run with the correct extractor (PRD §5.2) rather than
+  // bouncing the user back to re-pick the type.
+  | { ok: false; error: string; typeMismatch?: boolean };
 
 export type NormalisationResult = {
   canonicalName: string;
@@ -139,6 +146,7 @@ function parseVialExtraction(raw: string): VialExtraction | null {
     concentration_per_volume: parseNumberField(obj, "concentration_per_volume"),
     volume_ml: parseNumberField(obj, "volume_ml"),
     route: parseStringField(obj, "route"),
+    directions: parseStringField(obj, "directions"),
     expiry_date: parseStringField(obj, "expiry_date"),
     batch: parseStringField(obj, "batch"),
     manufacturer: parseStringField(obj, "manufacturer"),
@@ -211,11 +219,18 @@ export async function extractVial(
       .from("documents")
       .update({ status: "failed" })
       .eq("id", documentId);
-    return { ok: false, error: message };
+    return { ok: false, error: message, typeMismatch: true };
   }
 
   const extraction = parseVialExtraction(result.text);
   if (!extraction) {
+    // The model replied but we could not extract a JSON object. Log the length
+    // (never the content — it may echo label text / drug names) for diagnosis.
+    logWarn("extraction", "Vial response was unparseable", {
+      documentId,
+      modelUsed: result.modelUsed,
+      responseChars: result.text.length,
+    });
     await admin
       .from("documents")
       .update({ status: "failed" })
@@ -298,11 +313,16 @@ export async function extractPrescription(
       .from("documents")
       .update({ status: "failed" })
       .eq("id", documentId);
-    return { ok: false, error: message };
+    return { ok: false, error: message, typeMismatch: true };
   }
 
   const extraction = parsePrescriptionExtraction(result.text);
   if (!extraction) {
+    logWarn("extraction", "Prescription response was unparseable", {
+      documentId,
+      modelUsed: result.modelUsed,
+      responseChars: result.text.length,
+    });
     await admin
       .from("documents")
       .update({ status: "failed" })

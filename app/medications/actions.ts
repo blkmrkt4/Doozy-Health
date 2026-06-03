@@ -20,6 +20,8 @@ import {
   FREQUENCY_PERIODS,
   FREQUENCY_UNITS,
   ROUTES,
+  normaliseRoute,
+  isCountDoseUnit,
   type Concentration,
   type DoseUnit,
   type Frequency,
@@ -36,6 +38,7 @@ import {
 } from "@/lib/extraction";
 import { generateReminders } from "@/lib/reminders";
 import { explainInteraction } from "@/lib/interactions";
+import { logWarn } from "@/lib/log";
 
 function failNew(message: string): never {
   redirect(`/medications/new?error=${encodeURIComponent(message)}`);
@@ -177,6 +180,7 @@ export async function createMedication(formData: FormData) {
         frequency: prescribed.frequency,
         duration_days: str(formData, "prescribed_duration_days"),
         prescriber_name: str(formData, "prescriber_name"),
+        directions: str(formData, "directions"),
       },
       p_delivery: {
         form_type: formType,
@@ -517,6 +521,37 @@ function failExtract(message: string): never {
   redirect(`/medications/new?error=${encodeURIComponent(message)}`);
 }
 
+// A validation failure while confirming an extraction must keep the user ON the
+// review page with their extracted data intact — never bounce back to the scan
+// screen (which silently discards the extraction). Always pass the doc id.
+function failReview(docId: string, message: string): never {
+  redirect(
+    `/medications/new/extract?doc=${docId}&error=${encodeURIComponent(message)}`
+  );
+}
+
+/**
+ * Map an internal extraction error to clean, advice-free user copy. Internal
+ * causes (missing key, model / prompt / binding problems) must never surface in
+ * the UI — the regulatory line forbids any model/OpenRouter reference, and they
+ * are logged server-side instead. Helpful, already-clean guidance (e.g. the
+ * wrong document type was chosen) is passed through unchanged.
+ */
+function userExtractionMessage(rawError: string): string {
+  if (
+    /openrouter|api key|not configured|\bmodel\b|all models|\bprompt\b|binding|\bversion\b/i.test(
+      rawError
+    )
+  ) {
+    return "Photo scanning is temporarily unavailable. You can enter the details manually below.";
+  }
+  if (/parse/i.test(rawError)) {
+    return "We couldn't read the details from that photo. Try a clearer, well-lit photo, or enter them manually below.";
+  }
+  // Already clean and helpful (e.g. document-type mismatch guidance).
+  return rawError;
+}
+
 /**
  * Upload a photo and run extraction (vial or prescription based on
  * document_type). Stores the document, runs the appropriate extraction,
@@ -586,19 +621,62 @@ export async function uploadAndExtract(formData: FormData) {
     .eq("archived", false);
   const medNames = (meds ?? []).map((m) => m.display_name as string).join(", ");
 
-  // Run the appropriate extraction.
-  const result = documentType === "prescription_scan"
-    ? await extractPrescription(docId, base64, medNames)
-    : await extractVial(docId, base64, medNames, "metric");
+  // Run extraction with the chosen type. If the photo is actually the OTHER
+  // type, the extractor flags it (typeMismatch); rather than bouncing the user
+  // back to re-pick, we transparently re-run with the correct extractor and
+  // explain the switch on the review screen (PRD §5.2).
+  const runExtraction = (type: "prescription_scan" | "vial_photo") =>
+    type === "prescription_scan"
+      ? extractPrescription(docId, base64, medNames)
+      : extractVial(docId, base64, medNames, "metric");
+
+  let result = await runExtraction(documentType);
+  let switchedFrom: "prescription_scan" | "vial_photo" | null = null;
+
+  if (!result.ok && result.typeMismatch) {
+    const otherType =
+      documentType === "prescription_scan" ? "vial_photo" : "prescription_scan";
+    const retried = await runExtraction(otherType);
+    if (retried.ok) {
+      result = retried;
+      switchedFrom = documentType;
+      // Persist the corrected type so the document record matches what we read.
+      await supabase
+        .from("documents")
+        .update({ document_type: otherType })
+        .eq("id", docId);
+    } else {
+      // Neither type read cleanly — genuinely unreadable, not just a wrong pick.
+      logWarn("extraction", "Type mismatch and retry both failed", {
+        documentId: docId,
+        documentType,
+        otherType,
+      });
+      failExtract(
+        "We couldn't read this as a vial or a prescription. Try a clearer, well-lit photo, or enter the details manually below."
+      );
+    }
+  }
 
   if (!result.ok) {
+    // Loud in the server log (raw cause + correlation ids, no health values),
+    // clean and advice-free in the UI.
+    logWarn("extraction", "Extraction failed", {
+      documentId: docId,
+      documentType,
+      cause: result.error,
+    });
     redirect(
-      `/medications/new?error=${encodeURIComponent(`Extraction failed: ${result.error}`)}`
+      `/medications/new?error=${encodeURIComponent(userExtractionMessage(result.error))}`
     );
   }
 
-  // Redirect to the review page with the document ID.
-  redirect(`/medications/new/extract?doc=${docId}`);
+  // Redirect to the review page; flag a transparent type switch so the page can
+  // explain it ("you chose Vial, but this reads as a prescription").
+  const switchedParam = switchedFrom
+    ? `&switched=${switchedFrom === "prescription_scan" ? "prescription_to_vial" : "vial_to_prescription"}`
+    : "";
+  redirect(`/medications/new/extract?doc=${docId}${switchedParam}`);
 }
 
 /**
@@ -627,40 +705,60 @@ export async function confirmPhotoExtraction(formData: FormData) {
     .select("extracted_json, storage_path")
     .eq("id", docId)
     .single();
-  if (!doc?.extracted_json) failNew("No extraction found for this document.");
+  if (!doc?.extracted_json) failReview(docId, "No extraction found for this document.");
 
   const extraction = doc.extracted_json as unknown as VialExtraction;
 
   // Read user-confirmed values from the form.
   const displayName = str(formData, "drug_name");
-  if (!displayName) failNew("Enter the medication name.");
+  if (!displayName) failReview(docId, "Enter the medication name.");
 
   const doseAmount = Number(str(formData, "dose_amount"));
   if (!Number.isFinite(doseAmount) || doseAmount <= 0) {
-    failNew("Enter a valid dose amount.");
+    failReview(docId, "Enter a valid dose amount.");
   }
   const doseUnit = inSet(str(formData, "dose_unit"), DOSE_UNITS);
-  if (!doseUnit) failNew("Choose a valid dose unit.");
-  const route = inSet(str(formData, "route"), ROUTES);
-  if (!route) failNew("Choose a valid route.");
+  if (!doseUnit) failReview(docId, "Choose a valid dose unit.");
+  // Accept the canonical code or a human-readable phrasing ("by mouth" → oral).
+  const route =
+    inSet(str(formData, "route"), ROUTES) ?? normaliseRoute(str(formData, "route"));
+  if (!route) failReview(docId, "Choose a valid route.");
   const formType = inSet(str(formData, "form_type"), FORM_TYPES) ?? "vial";
 
-  // Build optional concentration.
+  // Store the concentration / strength on the delivery form.
+  // - Solid oral (tablet/capsule): the per-unit STRENGTH, e.g. 10 mg per 1
+  //   tablet — so "1 tablet" always carries its mg (PRD §5.11).
+  // - Injectable: the liquid concentration, e.g. 200 mg per 1 mL.
   let concentration: Concentration | undefined;
-  const concAmount = Number(str(formData, "concentration_amount"));
-  if (Number.isFinite(concAmount) && concAmount > 0) {
-    const concUnit = inSet(str(formData, "concentration_unit"), DOSE_UNITS) ?? "mg";
-    const perVolume = Number(str(formData, "concentration_per_volume") || "1");
-    concentration = {
-      amount: concAmount,
-      unit: concUnit,
-      per_volume: Number.isFinite(perVolume) && perVolume > 0 ? perVolume : 1,
-      volume_unit: "mL",
-    };
+  if (isCountDoseUnit(doseUnit)) {
+    const strengthAmount = Number(str(formData, "strength_amount"));
+    if (Number.isFinite(strengthAmount) && strengthAmount > 0) {
+      const strengthUnit =
+        inSet(str(formData, "strength_unit"), DOSE_UNITS) ?? "mg";
+      concentration = {
+        amount: strengthAmount,
+        unit: strengthUnit,
+        per_volume: 1,
+        volume_unit: doseUnit as "tablet" | "capsule",
+      };
+    }
+  } else {
+    const concAmount = Number(str(formData, "concentration_amount"));
+    if (Number.isFinite(concAmount) && concAmount > 0) {
+      const concUnit = inSet(str(formData, "concentration_unit"), DOSE_UNITS) ?? "mg";
+      const perVolume = Number(str(formData, "concentration_per_volume") || "1");
+      concentration = {
+        amount: concAmount,
+        unit: concUnit,
+        per_volume: Number.isFinite(perVolume) && perVolume > 0 ? perVolume : 1,
+        volume_unit: "mL",
+      };
+    }
   }
 
-  // Create medication via the RPC (same as manual creation).
-  const frequency: Frequency = { type: "as_needed" }; // default for photo path
+  // Schedule captured on the review form (falls back to PRN if not set).
+  const frequency: Frequency =
+    parseFrequency(formData, "freq") ?? { type: "as_needed" };
   const { data: medId, error: medErr } = await supabase.rpc(
     "create_manual_medication",
     {
@@ -672,6 +770,8 @@ export async function confirmPhotoExtraction(formData: FormData) {
         dose_unit: doseUnit,
         route,
         frequency,
+        duration_days: str(formData, "duration_days"),
+        directions: str(formData, "directions"),
       },
       p_delivery: {
         form_type: formType,
@@ -689,7 +789,7 @@ export async function confirmPhotoExtraction(formData: FormData) {
     }
   );
 
-  if (medErr) failNew(`Could not save the medication: ${medErr.message}`);
+  if (medErr) failReview(docId, `Could not save the medication: ${medErr.message}`);
 
   // Link the document to the medication.
   await admin
@@ -769,21 +869,23 @@ export async function confirmPrescriptionExtraction(formData: FormData) {
     .select("extracted_json")
     .eq("id", docId)
     .single();
-  if (!doc?.extracted_json) failNew("No extraction found for this document.");
+  if (!doc?.extracted_json) failReview(docId, "No extraction found for this document.");
 
   const extraction = doc.extracted_json as unknown as PrescriptionExtraction;
 
   const displayName = str(formData, "drug_name");
-  if (!displayName) failNew("Enter the medication name.");
+  if (!displayName) failReview(docId, "Enter the medication name.");
 
   const doseAmount = Number(str(formData, "dose_amount"));
   if (!Number.isFinite(doseAmount) || doseAmount <= 0) {
-    failNew("Enter a valid dose amount.");
+    failReview(docId, "Enter a valid dose amount.");
   }
   const doseUnit = inSet(str(formData, "dose_unit"), DOSE_UNITS);
-  if (!doseUnit) failNew("Choose a valid dose unit.");
-  const route = inSet(str(formData, "route"), ROUTES);
-  if (!route) failNew("Choose a valid route.");
+  if (!doseUnit) failReview(docId, "Choose a valid dose unit.");
+  // Accept the canonical code or a human-readable phrasing ("by mouth" → oral).
+  const route =
+    inSet(str(formData, "route"), ROUTES) ?? normaliseRoute(str(formData, "route"));
+  if (!route) failReview(docId, "Choose a valid route.");
 
   const durationDays = str(formData, "duration_days");
   const prescriber = str(formData, "prescriber");
@@ -804,6 +906,7 @@ export async function confirmPrescriptionExtraction(formData: FormData) {
         frequency,
         duration_days: durationDays,
         prescriber_name: prescriber,
+        directions: str(formData, "directions"),
       },
       p_delivery: {
         form_type: "pill_bottle",
@@ -817,7 +920,7 @@ export async function confirmPrescriptionExtraction(formData: FormData) {
     }
   );
 
-  if (medErr) failNew(`Could not save the medication: ${medErr.message}`);
+  if (medErr) failReview(docId, `Could not save the medication: ${medErr.message}`);
 
   // Link the document.
   await admin

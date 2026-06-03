@@ -25,6 +25,45 @@ export const ROUTE_LABELS: Record<Route, string> = {
   inhaled: "Inhaled",
 };
 
+// Map free-text / OCR'd route phrasings (e.g. "by mouth", "sub-Q", "PO") onto a
+// canonical Route so an extracted human-readable label still validates and saves
+// (PRD §5.2). Returns null if nothing recognisable matches.
+export function normaliseRoute(raw: string): Route | null {
+  const s = raw.trim().toLowerCase();
+  if (!s) return null;
+  if ((ROUTES as readonly string[]).includes(s)) return s as Route;
+
+  const exact: Record<string, Route> = {
+    "by mouth": "oral", mouth: "oral", orally: "oral", po: "oral",
+    "p.o.": "oral", "per os": "oral",
+    "under the tongue": "sublingual", sublingually: "sublingual", sl: "sublingual",
+    intramuscularly: "intramuscular", im: "intramuscular", "i.m.": "intramuscular",
+    "into the muscle": "intramuscular",
+    subcutaneously: "subcutaneous", subcut: "subcutaneous", "sub-q": "subcutaneous",
+    subq: "subcutaneous", "sub q": "subcutaneous", sc: "subcutaneous",
+    sq: "subcutaneous", "under the skin": "subcutaneous",
+    "through the skin": "transdermal",
+    rectal: "suppository", rectally: "suppository", pr: "suppository",
+    "per rectum": "suppository",
+    topically: "topical", "on the skin": "topical", "apply to skin": "topical",
+    inhalation: "inhaled", "by inhalation": "inhaled", inhale: "inhaled",
+    nebulised: "inhaled", nebulized: "inhaled",
+  };
+  if (exact[s]) return exact[s];
+
+  // Loose contains-based fallback for longer descriptive phrases.
+  if (s.includes("mouth") || s.includes("oral")) return "oral";
+  if (s.includes("tongue") || s.includes("sublingual")) return "sublingual";
+  if (s.includes("muscle") || s.includes("intramuscular")) return "intramuscular";
+  if (s.includes("subcut") || s.includes("sub-q") || s.includes("under the skin"))
+    return "subcutaneous";
+  if (s.includes("transdermal") || s.includes("patch")) return "transdermal";
+  if (s.includes("rectal") || s.includes("suppository")) return "suppository";
+  if (s.includes("inhal") || s.includes("nebuli")) return "inhaled";
+  if (s.includes("topical") || s.includes("skin")) return "topical";
+  return null;
+}
+
 // ── Dose units (native units, PRD §5.11) ────────────────────────────────────
 export const DOSE_UNITS = [
   "mg",
@@ -38,11 +77,29 @@ export const DOSE_UNITS = [
   "drop",
   "patch",
   "application",
+  // Count units for solid oral forms — the dose is "take N tablets/capsules",
+  // each carrying the medication's per-unit strength (PRD §5.11). The PK engine
+  // converts these to mg via the per-unit strength, not a weight factor.
+  "tablet",
+  "capsule",
 ] as const;
 export type DoseUnit = (typeof DOSE_UNITS)[number];
 
+// Dose units that are a COUNT of a solid form rather than a mass/volume — the
+// dose is "1 tablet", and the active amount comes from the per-unit strength.
+export const COUNT_DOSE_UNITS: ReadonlySet<string> = new Set([
+  "tablet",
+  "capsule",
+]);
+
+export function isCountDoseUnit(unit: string): boolean {
+  return COUNT_DOSE_UNITS.has(unit);
+}
+
 // ── Delivery form types (PRD §8) ────────────────────────────────────────────
 export const FORM_TYPES = [
+  "tablet",
+  "capsule",
   "vial",
   "patch",
   "pill_bottle",
@@ -54,6 +111,8 @@ export const FORM_TYPES = [
 export type FormType = (typeof FORM_TYPES)[number];
 
 export const FORM_TYPE_LABELS: Record<FormType, string> = {
+  tablet: "Tablet",
+  capsule: "Capsule",
   vial: "Vial",
   patch: "Patch",
   pill_bottle: "Pill bottle",
@@ -68,6 +127,32 @@ export const FORM_TYPE_LABELS: Record<FormType, string> = {
 export const INJECTABLE_FORM_TYPES: ReadonlySet<FormType> = new Set<FormType>([
   "vial",
 ]);
+
+export function isInjectableForm(form: FormType): boolean {
+  return INJECTABLE_FORM_TYPES.has(form);
+}
+
+// Best-guess delivery form from what the label gave us, so a scanned pill bottle
+// doesn't default to an injectable vial. A real liquid concentration (mg per
+// some mL) ⇒ vial; an oral route with no such concentration ⇒ pill bottle.
+export function guessFormType(opts: {
+  route: string;
+  concentrationAmount: number | null;
+  concentrationPerVolume: number | null;
+}): FormType {
+  const hasLiquidConcentration =
+    (opts.concentrationAmount ?? 0) > 0 && (opts.concentrationPerVolume ?? 0) > 0;
+  if (hasLiquidConcentration) return "vial";
+  const route = opts.route.trim().toLowerCase();
+  if (route === "intramuscular" || route === "subcutaneous") return "vial";
+  if (route === "transdermal") return "patch";
+  if (route === "inhaled") return "inhaler";
+  if (route === "suppository") return "suppository";
+  if (route === "topical") return "topical";
+  if (route === "sublingual") return "sublingual";
+  // Oral or unknown, no liquid concentration ⇒ a solid pill, i.e. a tablet.
+  return "tablet";
+}
 
 // ── Membership roles (PRD §5.6) ─────────────────────────────────────────────
 export type MembershipRole = "owner" | "caregiver" | "viewer";
@@ -85,11 +170,14 @@ export const FREQUENCY_UNITS = ["hour", "day", "week", "month"] as const;
 export const FREQUENCY_PERIODS = ["day", "week"] as const;
 
 // ── Concentration / syringe spec (delivery form jsonb) ──────────────────────
+// For liquids the concentration is an amount per mL (e.g. 200 mg / 1 mL). For
+// solid oral forms we reuse the same shape to store the per-unit STRENGTH, with
+// volume_unit set to the count unit (e.g. 10 mg / 1 tablet) — see §5.11.
 export type Concentration = {
   amount: number;
   unit: DoseUnit;
   per_volume: number;
-  volume_unit: "mL";
+  volume_unit: "mL" | "tablet" | "capsule";
 };
 
 export type SyringeSpec = {

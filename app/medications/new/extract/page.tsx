@@ -4,8 +4,25 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getActivePatient } from "@/lib/active-patient";
 import { DOCUMENTS_BUCKET, SIGNED_URL_TTL_SECONDS } from "@/lib/documents";
-import { DOSE_UNITS, ROUTES, FORM_TYPES } from "@/lib/types";
-import { ExtractionField } from "@/app/medications/_components/extraction-field";
+import {
+  DOSE_UNITS,
+  ROUTES,
+  ROUTE_LABELS,
+  normaliseRoute,
+} from "@/lib/types";
+import {
+  ExtractionField,
+  ExtractionSelect,
+} from "@/app/medications/_components/extraction-field";
+import { VialDoseForm } from "@/app/medications/_components/vial-dose-form";
+
+const ROUTE_OPTIONS = ROUTES.map((r) => ({ value: r, label: ROUTE_LABELS[r] }));
+const DOSE_UNIT_OPTIONS = DOSE_UNITS.map((u) => ({ value: u, label: u }));
+
+/** Pre-select a valid dose unit, defaulting to mg if the extracted one is odd. */
+function defaultDoseUnit(raw: string): string {
+  return (DOSE_UNITS as readonly string[]).includes(raw) ? raw : "mg";
+}
 import {
   confirmPhotoExtraction,
   confirmPrescriptionExtraction,
@@ -26,13 +43,27 @@ function isVialExtraction(obj: unknown): obj is VialExtraction {
   );
 }
 
+// When the chosen type didn't match the photo, uploadAndExtract re-runs with
+// the correct extractor and passes ?switched=… so we can explain it here rather
+// than having rejected the upload.
+function switchNotice(switched: string | undefined): string | null {
+  if (switched === "vial_to_prescription") {
+    return "You chose Vial / package, but this photo reads as a prescription — so we extracted it as a prescription. Review the details below.";
+  }
+  if (switched === "prescription_to_vial") {
+    return "You chose Prescription, but this photo reads as a vial or package label — so we extracted it as a vial. Review the details below.";
+  }
+  return null;
+}
+
 export default async function ExtractionReviewPage({
   searchParams,
 }: {
-  searchParams: Promise<{ doc?: string; error?: string }>;
+  searchParams: Promise<{ doc?: string; error?: string; switched?: string }>;
 }) {
-  const { doc: docId, error } = await searchParams;
+  const { doc: docId, error, switched } = await searchParams;
   if (!docId) notFound();
+  const switchedNote = switchNotice(switched);
 
   const supabase = await createClient();
   const {
@@ -89,6 +120,12 @@ export default async function ExtractionReviewPage({
           to create the medication.
         </p>
 
+        {switchedNote ? (
+          <p className="mt-4 rounded-md border border-accent/40 bg-surface p-3 text-sm text-muted">
+            {switchedNote}
+          </p>
+        ) : null}
+
         {error ? (
           <p className="mt-4 rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">
             {error}
@@ -119,6 +156,24 @@ export default async function ExtractionReviewPage({
           <form action={confirmPhotoExtraction} className="mt-6 space-y-6">
             <input type="hidden" name="document_id" value={docId} />
 
+            <fieldset className="space-y-2 rounded-md border border-line p-4">
+              <legend className="text-sm font-medium text-paper">
+                Directions
+              </legend>
+              <p className="text-xs text-faint">
+                Copied exactly as written on the label. Kept verbatim with the
+                medication so you — or a caregiver — always see how it&rsquo;s
+                meant to be taken. Edit only to fix a misread.
+              </p>
+              <textarea
+                name="directions"
+                rows={2}
+                defaultValue={vial.directions?.value ?? ""}
+                placeholder="e.g. Take 1 tablet by mouth every morning"
+                className="block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent"
+              />
+            </fieldset>
+
             <fieldset className="space-y-4 rounded-md border border-line p-4">
               <legend className="text-sm font-medium text-paper">
                 Drug identity
@@ -137,100 +192,39 @@ export default async function ExtractionReviewPage({
                 value={vial.strength.value}
                 confidence={vial.strength.confidence}
               />
-              <ExtractionField
+              <ExtractionSelect
                 label="Route"
                 name="route"
-                value={vial.route.value}
+                value={normaliseRoute(vial.route.value) ?? ""}
                 confidence={vial.route.confidence}
+                options={ROUTE_OPTIONS}
+                placeholder="Select a route…"
               />
             </fieldset>
 
-            <fieldset className="space-y-4 rounded-md border border-line p-4">
-              <legend className="text-sm font-medium text-paper">Dosage</legend>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <label htmlFor="dose_amount" className="block text-sm text-muted">
-                    Dose amount
-                  </label>
-                  <input
-                    id="dose_amount"
-                    name="dose_amount"
-                    type="number"
-                    step="any"
-                    defaultValue={vial.concentration_amount.value ?? ""}
-                    required
-                    className="mt-1 block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="dose_unit" className="block text-sm text-muted">
-                    Unit
-                  </label>
-                  <select
-                    id="dose_unit"
-                    name="dose_unit"
-                    defaultValue={vial.concentration_unit.value || "mg"}
-                    className="mt-1 block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent"
-                  >
-                    {DOSE_UNITS.map((u) => (
-                      <option key={u} value={u}>{u}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </fieldset>
+            {/* Form-aware dosing: the delivery-form selector switches between
+                an injectable (concentration + syringe volume) and a solid oral
+                form (take N tablets). A pill never gets the injectable UI. */}
+            <VialDoseForm
+              strength={vial.strength.value}
+              route={normaliseRoute(vial.route.value) ?? ""}
+              defaultDoseUnit={vial.concentration_unit.value || "mg"}
+              concentration={{
+                amount: vial.concentration_amount.value,
+                unit: vial.concentration_unit.value || "mg",
+                perVolume: vial.concentration_per_volume.value,
+                volumeMl: vial.volume_ml.value,
+                amountConfidence: vial.concentration_amount.confidence,
+                unitConfidence: vial.concentration_unit.confidence,
+                perVolumeConfidence: vial.concentration_per_volume.confidence,
+                volumeConfidence: vial.volume_ml.confidence,
+              }}
+            />
 
             <fieldset className="space-y-4 rounded-md border border-line p-4">
               <legend className="text-sm font-medium text-paper">
-                Delivery form
+                Packaging details
               </legend>
-              <div>
-                <label htmlFor="form_type" className="block text-sm text-muted">
-                  Form type
-                </label>
-                <select
-                  id="form_type"
-                  name="form_type"
-                  defaultValue="vial"
-                  className="mt-1 block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent"
-                >
-                  {FORM_TYPES.map((f) => (
-                    <option key={f} value={f}>{f}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="grid gap-4 sm:grid-cols-3">
-                <ExtractionField
-                  label="Concentration"
-                  name="concentration_amount"
-                  value={String(vial.concentration_amount.value ?? "")}
-                  confidence={vial.concentration_amount.confidence}
-                  type="number"
-                  step="any"
-                />
-                <ExtractionField
-                  label="Conc. unit"
-                  name="concentration_unit"
-                  value={vial.concentration_unit.value}
-                  confidence={vial.concentration_unit.confidence}
-                />
-                <ExtractionField
-                  label="Per volume (mL)"
-                  name="concentration_per_volume"
-                  value={String(vial.concentration_per_volume.value ?? "")}
-                  confidence={vial.concentration_per_volume.confidence}
-                  type="number"
-                  step="any"
-                />
-              </div>
-              <ExtractionField
-                label="Volume (mL)"
-                name="volume_ml"
-                value={String(vial.volume_ml.value ?? "")}
-                confidence={vial.volume_ml.confidence}
-                type="number"
-                step="any"
-              />
               <ExtractionField
                 label="Manufacturer"
                 name="manufacturer"
@@ -265,6 +259,23 @@ export default async function ExtractionReviewPage({
           >
             <input type="hidden" name="document_id" value={docId} />
 
+            <fieldset className="space-y-2 rounded-md border border-line p-4">
+              <legend className="text-sm font-medium text-paper">
+                Directions
+              </legend>
+              <p className="text-xs text-faint">
+                The dosing instructions as written. Kept with the medication so
+                you — or a caregiver — can always see how it&rsquo;s meant to be
+                taken.
+              </p>
+              <textarea
+                name="directions"
+                rows={2}
+                placeholder="e.g. Take 1 tablet by mouth every morning"
+                className="block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent"
+              />
+            </fieldset>
+
             <fieldset className="space-y-4 rounded-md border border-line p-4">
               <legend className="text-sm font-medium text-paper">
                 Drug identity
@@ -275,11 +286,13 @@ export default async function ExtractionReviewPage({
                 value={rx.drug_name.value}
                 confidence={rx.drug_name.confidence}
               />
-              <ExtractionField
+              <ExtractionSelect
                 label="Route"
                 name="route"
-                value={rx.route.value}
+                value={normaliseRoute(rx.route.value) ?? ""}
                 confidence={rx.route.confidence}
+                options={ROUTE_OPTIONS}
+                placeholder="Select a route…"
               />
             </fieldset>
 
@@ -296,11 +309,12 @@ export default async function ExtractionReviewPage({
                   type="number"
                   step="any"
                 />
-                <ExtractionField
+                <ExtractionSelect
                   label="Dose unit"
                   name="dose_unit"
-                  value={rx.dose_unit.value || "mg"}
+                  value={defaultDoseUnit(rx.dose_unit.value)}
                   confidence={rx.dose_unit.confidence}
+                  options={DOSE_UNIT_OPTIONS}
                 />
               </div>
               <ExtractionField

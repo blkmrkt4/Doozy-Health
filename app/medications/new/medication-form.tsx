@@ -194,6 +194,19 @@ export function MedicationForm() {
             <input type="text" name="prescriber_name" className={inputCls} />
           </label>
         </div>
+        <label className={labelCls}>
+          Directions (optional)
+          <textarea
+            name="directions"
+            rows={2}
+            placeholder="e.g. Take 1 tablet by mouth every morning"
+            className={inputCls}
+          />
+          <span className="mt-1 block text-xs text-faint">
+            Kept with the medication so you — or a caregiver — can always see how
+            it&rsquo;s meant to be taken.
+          </span>
+        </label>
       </fieldset>
 
       {/* Delivery form */}

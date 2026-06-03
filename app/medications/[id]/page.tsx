@@ -43,6 +43,7 @@ type Regimen = {
   duration_days?: number | null;
   prescriber_name?: string | null;
   reason_note?: string | null;
+  directions?: string | null;
   active?: boolean;
 };
 
@@ -290,6 +291,15 @@ export default async function MedicationDetailPage({
               isInjectable={isInjectable}
               isPatch={delivery?.form_type === "patch"}
             />
+          </section>
+        ) : null}
+
+        {/* Directions as captured — plain-language instructions a caregiver can
+            rely on at a glance, across however many patients they manage. */}
+        {prescribed?.directions ? (
+          <section className="rounded-md border border-accent/40 bg-surface p-4">
+            <h2 className="text-sm font-medium text-accent">Directions</h2>
+            <p className="mt-1 text-sm text-paper">{prescribed.directions}</p>
           </section>
         ) : null}
 

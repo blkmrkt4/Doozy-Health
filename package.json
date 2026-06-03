@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "npm run sync:key || true",
     "dev": "next dev --turbopack",
     "build": "next build --webpack",
     "start": "next start",
@@ -11,7 +12,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "sync:drugs": "vite-node scripts/sync-drugs.ts",
-    "sync:models": "vite-node scripts/sync-models.ts"
+    "sync:models": "vite-node scripts/sync-models.ts",
+    "seed:key": "vite-node scripts/seed-openrouter-key.ts",
+    "sync:key": "vite-node scripts/sync-openrouter-key.ts"
   },
   "dependencies": {
     "@serwist/next": "^9.5.11",

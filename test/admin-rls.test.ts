@@ -136,7 +136,9 @@ describe.skipIf(!STACK_READY)("admin backend RLS", () => {
       .from("prompt_versions")
       .select("*");
     expect(error).toBeNull();
-    expect(data!.length).toBe(7); // one per seed prompt
+    // At least one version per seed prompt (7). Prompts can be revised, which
+    // adds further versions (e.g. extract_vial gained a v2), so assert a floor.
+    expect(data!.length).toBeGreaterThanOrEqual(7);
   });
 
   // ── prompt_bindings: admin-only ──

@@ -13,6 +13,9 @@ const withSerwist = withSerwistInit({
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // Local dev is accessed via 127.0.0.1 (matches the Supabase auth site_url);
+  // allow it as a dev origin so HMR/asset requests aren't flagged cross-origin.
+  allowedDevOrigins: ["127.0.0.1"],
   experimental: {
     // Photo/PDF uploads run through server actions; allow up to the 25 MB
     // documents-bucket cap (PRD §5.1; matches the documents migration).

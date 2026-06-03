@@ -118,10 +118,11 @@ describe.skipIf(!STACK_READY)("llmCall integration", () => {
 
   it("llmCall returns success when primary model works", async () => {
     const llmModule = await import("@/lib/llm");
+    const openrouterModule = await import("@/lib/openrouter");
     const secretsModule = await import("@/lib/secrets");
 
     const spy = vi
-      .spyOn(llmModule, "callOpenRouter")
+      .spyOn(openrouterModule, "callOpenRouter")
       .mockResolvedValueOnce({
         text: "Primary response",
         inputTokens: 10,
@@ -157,9 +158,10 @@ describe.skipIf(!STACK_READY)("llmCall integration", () => {
 
   it("falls back when primary fails", async () => {
     const llmModule = await import("@/lib/llm");
+    const openrouterModule = await import("@/lib/openrouter");
     const secretsModule = await import("@/lib/secrets");
 
-    vi.spyOn(llmModule, "callOpenRouter")
+    vi.spyOn(openrouterModule, "callOpenRouter")
       .mockRejectedValueOnce(new Error("Primary timeout"))
       .mockResolvedValueOnce({
         text: "Fallback 1 response",
@@ -185,9 +187,10 @@ describe.skipIf(!STACK_READY)("llmCall integration", () => {
 
   it("returns ok: false when all models fail", async () => {
     const llmModule = await import("@/lib/llm");
+    const openrouterModule = await import("@/lib/openrouter");
     const secretsModule = await import("@/lib/secrets");
 
-    vi.spyOn(llmModule, "callOpenRouter")
+    vi.spyOn(openrouterModule, "callOpenRouter")
       .mockRejectedValueOnce(new Error("Primary fail"))
       .mockRejectedValueOnce(new Error("Fallback 1 fail"))
       .mockRejectedValueOnce(new Error("Fallback 2 fail"));
@@ -215,7 +218,8 @@ describe.skipIf(!STACK_READY)("llmCall integration", () => {
 
   it("returns error for disabled/missing prompt without calling OpenRouter", async () => {
     const llmModule = await import("@/lib/llm");
-    const spy = vi.spyOn(llmModule, "callOpenRouter");
+    const openrouterModule = await import("@/lib/openrouter");
+    const spy = vi.spyOn(openrouterModule, "callOpenRouter");
 
     // Use a slug that doesn't exist — should return "not found".
     const result = await llmModule.llmCall("nonexistent_test_prompt_xyz", {});
@@ -242,10 +246,11 @@ describe.skipIf(!STACK_READY)("llmCall integration", () => {
 
   it("attaches images as multipart content array", async () => {
     const llmModule = await import("@/lib/llm");
+    const openrouterModule = await import("@/lib/openrouter");
     const secretsModule = await import("@/lib/secrets");
 
     const spy = vi
-      .spyOn(llmModule, "callOpenRouter")
+      .spyOn(openrouterModule, "callOpenRouter")
       .mockResolvedValueOnce({
         text: "Saw the image",
         inputTokens: 50,
@@ -281,6 +286,7 @@ describe.skipIf(!STACK_READY)("llmCall integration", () => {
 
   it("writes llm_call_logs entries", async () => {
     const llmModule = await import("@/lib/llm");
+    const openrouterModule = await import("@/lib/openrouter");
     const secretsModule = await import("@/lib/secrets");
 
     // Clear existing logs.
@@ -289,7 +295,7 @@ describe.skipIf(!STACK_READY)("llmCall integration", () => {
       .delete()
       .eq("prompt_slug", TEST_SLUG);
 
-    vi.spyOn(llmModule, "callOpenRouter")
+    vi.spyOn(openrouterModule, "callOpenRouter")
       .mockRejectedValueOnce(new Error("fail"))
       .mockResolvedValueOnce({
         text: "ok",

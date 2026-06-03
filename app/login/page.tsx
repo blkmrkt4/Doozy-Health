@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { sendMagicLink } from "./actions";
+import { sendMagicLink, devSignIn } from "./actions";
+
+const DEV_AUTH_BYPASS = process.env.NODE_ENV !== "production";
 
 export default async function LoginPage({
   searchParams,
@@ -56,6 +58,24 @@ export default async function LoginPage({
             ) : null}
           </form>
         )}
+
+        {DEV_AUTH_BYPASS ? (
+          <form action={devSignIn} className="mt-6 border-t border-line pt-4">
+            {params.next ? (
+              <input type="hidden" name="next" value={params.next} />
+            ) : null}
+            <input type="hidden" name="email" value="blkmrkt.runner@gmail.com" />
+            <button
+              type="submit"
+              className="block w-full rounded-md border border-line bg-surface px-4 py-2.5 text-sm font-medium text-muted transition-opacity hover:opacity-90"
+            >
+              Dev: instant sign-in
+            </button>
+            <p className="mt-2 text-xs text-faint">
+              Local only — skips email. Hidden in production builds.
+            </p>
+          </form>
+        ) : null}
       </div>
     </main>
   );
