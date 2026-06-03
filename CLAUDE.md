@@ -77,7 +77,7 @@ The admin backend (PRD §14) holds all the LLM machinery — the most security-s
 - **Images attach via `opts.images`** (base64 data URLs), never through `{{placeholders}}`. The body says "(see attached)."
 - Result is a discriminated union returning **raw `text`** — the **caller parses and validates JSON defensively** (tolerate fences, take first `{`…`}`, validate enums). Never trust model JSON blindly, even with a schema bound.
 - `/admin` is gated by `requireSystemAdmin()` → 404 (not 403) for non-admins. Regular users never see any reference to models, prompts, OpenRouter, or costs.
-- `system_secrets` is app-layer encrypted (`lib/crypto.ts`, `SECRET_ENCRYPTION_KEY`) with **no client RLS** — server actions only. Store `value_encrypted` + `value_masked`; never return the raw value.
+- `system_secrets` is app-layer encrypted (`lib/crypto.ts`, `SECRET_ENCRYPTION_KEY`) with **no client RLS** — server actions only. Store `value_encrypted` + `value_masked`; never return the raw value. **Documented exception:** `revealOpenRouterKey()` (`app/admin/settings/actions.ts`) returns the decrypted OpenRouter key to a system admin so an existing key can be reused on another machine — gated by `requireSystemAdmin()`, scoped to that one key, and every reveal is written to `admin_audit_log` (`view_source`). Do **not** generalise this to other secrets without the same gating + audit and an explicit owner sign-off.
 
 New prompt: add a seed row (slug `^[a-z][a-z0-9_]*$`, may ship `disabled` with a placeholder body) + a `prompt_bindings` row, call via `llmCall('slug', {...}, { images })`, tell the admin to tune the binding after deploy. Never add a "quick path" that skips the service — add a prompt instead.
 

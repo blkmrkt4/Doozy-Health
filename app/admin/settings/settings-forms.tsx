@@ -1,7 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import { ModelPicker, type ModelRow } from "@/app/admin/_components/model-picker";
-import { saveApiKey, saveDefaultModels, refreshModelCatalogue } from "./actions";
+import {
+  saveApiKey,
+  saveDefaultModels,
+  refreshModelCatalogue,
+  revealOpenRouterKey,
+} from "./actions";
 
 const inputCls =
   "block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent";
@@ -11,6 +17,82 @@ const btnPrimary =
 const btnSecondary =
   "rounded-md border border-line px-4 py-2 text-sm text-muted transition-colors hover:bg-surface";
 const sectionCls = "rounded-md border border-line p-4 space-y-4";
+
+/**
+ * Owner-only reveal + copy of the stored OpenRouter key, so it can be reused on
+ * another machine. The decrypt happens server-side (revealOpenRouterKey, which
+ * audit-logs every reveal); the value is held in local state only, and auto-
+ * hides after 30s.
+ */
+function RevealKey() {
+  const [value, setValue] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [pending, setPending] = useState(false);
+
+  async function reveal() {
+    setError(null);
+    setPending(true);
+    const res = await revealOpenRouterKey();
+    setPending(false);
+    if (res.ok) {
+      setValue(res.value);
+      window.setTimeout(() => setValue(null), 30_000);
+    } else {
+      setError(res.error);
+    }
+  }
+
+  async function copy() {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError("Couldn't copy to the clipboard — select and copy manually.");
+    }
+  }
+
+  if (value) {
+    return (
+      <div className="space-y-1">
+        <div className="flex gap-3">
+          <input
+            readOnly
+            value={value}
+            onFocus={(e) => e.currentTarget.select()}
+            className={`${inputCls} flex-1 font-mono`}
+          />
+          <button type="button" onClick={copy} className={btnSecondary}>
+            {copied ? "Copied" : "Copy"}
+          </button>
+          <button type="button" onClick={() => setValue(null)} className={btnSecondary}>
+            Hide
+          </button>
+        </div>
+        <p className="text-xs text-faint">
+          Full key — system admins only, and every reveal is logged. Auto-hides in
+          30 seconds.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      <button
+        type="button"
+        onClick={reveal}
+        disabled={pending}
+        className={`${btnSecondary} disabled:opacity-50`}
+      >
+        {pending ? "Revealing…" : "Reveal & copy key"}
+      </button>
+      {error ? <p className="text-xs text-red-400">{error}</p> : null}
+    </div>
+  );
+}
 
 export function SettingsForms({
   apiKeyMasked,
@@ -39,15 +121,18 @@ export function SettingsForms({
       <section className={sectionCls}>
         <h2 className="text-lg font-medium">OpenRouter API key</h2>
         {apiKeyMasked ? (
-          <p className="font-mono text-sm text-muted">
-            Current: <span className="text-paper">{apiKeyMasked}</span>
-            {apiKeyUpdatedAt ? (
-              <span className="ml-2 text-xs text-faint">
-                (updated{" "}
-                {new Date(apiKeyUpdatedAt).toLocaleDateString("en-GB")})
-              </span>
-            ) : null}
-          </p>
+          <>
+            <p className="font-mono text-sm text-muted">
+              Current: <span className="text-paper">{apiKeyMasked}</span>
+              {apiKeyUpdatedAt ? (
+                <span className="ml-2 text-xs text-faint">
+                  (updated{" "}
+                  {new Date(apiKeyUpdatedAt).toLocaleDateString("en-GB")})
+                </span>
+              ) : null}
+            </p>
+            <RevealKey />
+          </>
         ) : (
           <p className="text-sm text-faint">No key configured.</p>
         )}

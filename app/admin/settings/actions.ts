@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireSystemAdmin } from "@/lib/admin";
-import { writeSecret } from "@/lib/secrets";
+import { writeSecret, readSecret } from "@/lib/secrets";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { syncModels } from "@/lib/models";
 
@@ -47,6 +47,42 @@ export async function saveApiKey(formData: FormData) {
 
   revalidatePath("/admin/settings");
   redirect("/admin/settings?success=API+key+saved");
+}
+
+/**
+ * Reveal the decrypted OpenRouter key to a system admin, so an existing key can
+ * be reused on another machine / cloud project without minting a new one.
+ *
+ * DELIBERATE EXCEPTION to the CLAUDE.md rule "never return the raw value": it is
+ * gated to system admins (requireSystemAdmin → 404 for everyone else), scoped to
+ * this single key only, and every reveal is written to admin_audit_log. Approved
+ * by the owner. Do NOT generalise this to arbitrary secrets.
+ */
+export async function revealOpenRouterKey(): Promise<
+  { ok: true; value: string } | { ok: false; error: string }
+> {
+  const admin = await requireSystemAdmin();
+
+  let value: string;
+  try {
+    value = await readSecret("openrouter_api_key");
+  } catch {
+    return { ok: false, error: "No OpenRouter key is configured." };
+  }
+
+  const svc = createAdminClient();
+  // 'view_source' is the audit action for viewing sensitive content (the
+  // admin_audit_log.action CHECK only allows create/update/delete/view_source).
+  await auditLog(
+    svc,
+    admin.id,
+    "system_secret",
+    "openrouter_api_key",
+    "view_source",
+    "openrouter key revealed"
+  );
+
+  return { ok: true, value };
 }
 
 export async function saveDefaultModels(formData: FormData) {
