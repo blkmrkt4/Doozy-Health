@@ -161,7 +161,7 @@ export default async function VerificationPage({
         </p>
 
         {error ? (
-          <p className="mt-4 rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">
+          <p className="mt-4 rounded-md border alert-error p-3 text-sm">
             {error}
           </p>
         ) : null}
@@ -232,7 +232,7 @@ export default async function VerificationPage({
         <div className="mt-6 flex gap-3">
           <Link
             href={`/medications/${medicationId}`}
-            className="rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-ink transition-opacity hover:opacity-90"
+            className="rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-on-accent transition-opacity hover:opacity-90"
           >
             Done
           </Link>

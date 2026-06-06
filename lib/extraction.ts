@@ -54,6 +54,21 @@ export type ExtractionResult =
   // bouncing the user back to re-pick the type.
   | { ok: false; error: string; typeMismatch?: boolean };
 
+// Syringe packaging extraction (PRD §5.1, §14.8). American English. Like the
+// vial path, never auto-commits — the caller confirms on a review screen.
+export type SyringeExtraction = {
+  capacity_ml: ExtractedField<number | null>;
+  needle_gauge: ExtractedField<number | null>;
+  needle_length_in: ExtractedField<number | null>;
+  unit_markings: ExtractedField;
+  manufacturer: ExtractedField;
+  batch: ExtractedField;
+};
+
+export type SyringeExtractionResult =
+  | { ok: true; extraction: SyringeExtraction; modelUsed: string; promptVersionId: string }
+  | { ok: false; error: string };
+
 export type NormalisationResult = {
   canonicalName: string;
   drugId: string | null;
@@ -166,6 +181,72 @@ function parsePrescriptionExtraction(raw: string): PrescriptionExtraction | null
     route: parseStringField(obj, "route"),
     prescriber: parseStringField(obj, "prescriber"),
     refills: parseNumberField(obj, "refills"),
+  };
+}
+
+function parseSyringeExtraction(raw: string): SyringeExtraction | null {
+  const obj = extractJson(raw);
+  if (!obj) return null;
+  return {
+    capacity_ml: parseNumberField(obj, "capacity_ml"),
+    needle_gauge: parseNumberField(obj, "needle_gauge"),
+    needle_length_in: parseNumberField(obj, "needle_length_in"),
+    unit_markings: parseStringField(obj, "unit_markings"),
+    manufacturer: parseStringField(obj, "manufacturer"),
+    batch: parseStringField(obj, "batch"),
+  };
+}
+
+/**
+ * Run the extract_syringe prompt against a syringe packaging photo. Updates the
+ * document status + extracted_json. Never writes to inventory (caller confirms).
+ */
+export async function extractSyringe(
+  documentId: string,
+  imageBase64: string,
+  knownSyringeTypes: string
+): Promise<SyringeExtractionResult> {
+  const admin = createAdminClient();
+  await admin.from("documents").update({ status: "processing" }).eq("id", documentId);
+
+  const result = await llmCall(
+    "extract_syringe",
+    { syringe_reference_types: knownSyringeTypes },
+    { images: [imageBase64] }
+  );
+
+  if (!result.ok) {
+    await admin.from("documents").update({ status: "failed" }).eq("id", documentId);
+    return { ok: false, error: result.error };
+  }
+
+  const extraction = parseSyringeExtraction(result.text);
+  if (!extraction) {
+    logWarn("extraction", "Syringe response was unparseable", {
+      documentId,
+      modelUsed: result.modelUsed,
+      responseChars: result.text.length,
+    });
+    await admin.from("documents").update({ status: "failed" }).eq("id", documentId);
+    return { ok: false, error: "Could not parse the extraction response." };
+  }
+
+  await admin
+    .from("documents")
+    .update({ extracted_json: extraction, status: "extracted" })
+    .eq("id", documentId);
+
+  const { data: prompt } = await admin
+    .from("prompts")
+    .select("current_version_id")
+    .eq("slug", "extract_syringe")
+    .single();
+
+  return {
+    ok: true,
+    extraction,
+    modelUsed: result.modelUsed,
+    promptVersionId: (prompt?.current_version_id as string) ?? "",
   };
 }
 

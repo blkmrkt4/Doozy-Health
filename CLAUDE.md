@@ -38,8 +38,8 @@ Never do these without explicit user approval in the chat. If you're about to, s
 10. **Never put `patient_id` or `medication_id` in `extraction_deltas`** (see "ExtractionDelta").
 11. **Never run destructive migrations** (`DROP`, `TRUNCATE`, deleting backfills) without showing them and getting an explicit "yes, run it."
 12. **Never log health values** — medication names, dosages, dose times, photo contents. Scrub them everywhere.
-13. **Never add an npm dependency** without naming it, why, its weight, and the alternative. (Incoming: Twilio, Puppeteer, a charting lib, Web Push/VAPID — still flag each.)
-14. **Never gamify dose-taking** — no streaks, badges, or guilt prompts. It reframes the diary as a behaviour-modification product and crosses the regulatory line.
+13. **Name every npm dependency you add** — its purpose, weight, and the alternative considered. Dependencies are permitted where they earn their place (PRD §7); there is no blanket prohibition. (Planned: Twilio, Puppeteer, a charting lib, Web Push/VAPID; `motion` is already in for the calendar wheel.)
+14. **Never gamify dose-taking** — no streaks, no badges, no "X days in a row", no surfaced adherence *score* or percentage, no guilt language on a missed dose, and no celebratory animation/confetti on a logged dose. A **factual adherence calendar is permitted**: it may colour-grade each day by what was actually logged versus scheduled (green = taken as chosen, graduated orange = partial, red = due-but-none-logged on a **past** day only) and use distinct per-medication identity colours. It is a neutral **record of what was logged**, not an instruction, target, or judgement — today is never shown as "missed", the future shows scheduled doses only, and no copy tells the user to dose. Anything beyond a factual record (rewards, streaks, habit mechanics) still crosses the regulatory line.
 
 ---
 
@@ -64,6 +64,7 @@ The caregiver model makes patient ↔ user many-to-many, so there is **no single
 - The active patient is app session state, never a DB default.
 - Storage keys are `<patient_id>/<doc_id>.<ext>`; the folder check runs against the membership set.
 - `is_private` is enforced in the RLS predicate, not just the UI.
+- **Write model (PRD §5.6):** owners **and** caregivers create `dose_logs` / `diary_entries` / `pk_calibrations`. **Only owners** edit regimens, change roles, invite/remove members, mark a medication private, or manage medications & inventory (e.g. syringes). `viewer` writes nothing. Enforce by role in RLS, not a blanket owner-only-write rule.
 
 If you reach for a one-household-per-user pattern out of habit, stop — it silently breaks multi-patient access.
 
@@ -79,7 +80,7 @@ The admin backend (PRD §14) holds all the LLM machinery — the most security-s
 - `/admin` is gated by `requireSystemAdmin()` → 404 (not 403) for non-admins. Regular users never see any reference to models, prompts, OpenRouter, or costs.
 - `system_secrets` is app-layer encrypted (`lib/crypto.ts`, `SECRET_ENCRYPTION_KEY`) with **no client RLS** — server actions only. Store `value_encrypted` + `value_masked`; never return the raw value. **Documented exception:** `revealOpenRouterKey()` (`app/admin/settings/actions.ts`) returns the decrypted OpenRouter key to a system admin so an existing key can be reused on another machine — gated by `requireSystemAdmin()`, scoped to that one key, and every reveal is written to `admin_audit_log` (`view_source`). Do **not** generalise this to other secrets without the same gating + audit and an explicit owner sign-off.
 
-New prompt: add a seed row (slug `^[a-z][a-z0-9_]*$`, may ship `disabled` with a placeholder body) + a `prompt_bindings` row, call via `llmCall('slug', {...}, { images })`, tell the admin to tune the binding after deploy. Never add a "quick path" that skips the service — add a prompt instead.
+New prompt: add a seed row (slug `^[a-z][a-z0-9_]*$`) — it may ship **enabled with a real body** or `disabled` with a placeholder; either way the body lives in `prompt_versions`, **never inlined in code** (rule #3) — plus a `prompt_bindings` row, call via `llmCall('slug', {...}, { images })`. Refine the body/binding in `/admin` after deploy. Never add a "quick path" that skips the service — add a prompt instead.
 
 ---
 
@@ -92,14 +93,14 @@ On every confirmation, write one `extraction_deltas` row per diverging field. Fu
 ## Conventions
 
 - **TypeScript everywhere.** No `.js` in the app (config excepted). `any` is a code smell; flag it when forced.
-- **British English** in comments, UI copy, and prompt bodies (categorise, normalise, colour).
+- **American English** in comments, UI copy, and prompt bodies (categorize, normalize, color). Pre-v0.6 code may still use British spellings (e.g. the `medications.colour` column, `lib/colours.ts`) — leave those as-is; write new code American.
 - **App Router:** server components by default, `'use client'` only when needed, server actions for admin mutations, route handlers in `app/api/`.
 - **Naming:** kebab-case files, PascalCase components, camelCase functions/vars, **snake_case DB columns** — `patient_id` not `patientId` in DB references.
 - **Imports:** absolute from `@/`, never deep relative.
 - **Errors:** typed, small error-class hierarchy; not `throw new Error("string")` for catchable cases.
 - **Comments:** explain *why*, not *what*.
 - **DB:** patient tables snake_case plural with the membership RLS predicate; admin tables global, gated by `is_current_system_admin()`. **Dose amounts and concentrations are `numeric`, never float.** `date` for calendar dates, `timestamptz` for instants. `created_at` on every table, `updated_at` + `set_updated_at()` trigger on mutable ones. Migrations forward-only — never edit an applied one.
-- **UI:** mobile-first; calm, dense, monochrome with a single accent (ByZyB electric yellow `#F4EE35` on black); no animations or confetti on a logged dose; tabular figures, right-aligned numbers; the syringe visual calibrated to the user's actual spec; the half-life view never alarmist (no red zones, no "dose now"); staleness neutral ("last logged 4 days ago"); privacy-mode blur as global state; a patient switcher when a user has more than one patient.
+- **UI:** mobile-first; calm, dense, monochrome with a single accent (ByZyB electric yellow `#F4EE35`). **Ships dark (default) + light themes** via the same semantic color tokens in `app/globals.css` (`--color-ink/paper/muted/faint/line/surface`, overridden under `:root[data-theme="light"]`); accent stays yellow in both and on-accent text uses `--color-on-accent` (never `text-ink`). Style with the tokens (`bg-ink`, `text-paper`, `border-line`, …) or `var(--color-*)` — **never hardcode hex or `bg-white`/`text-black`/`*-red-300`-type literals** in app code, or it won't adapt; status banners use `.alert-error` / `.alert-success`. No animations or confetti on a logged dose; tabular figures, right-aligned numbers; the syringe visual calibrated to the user's actual spec; the half-life view never alarmist (no red zones, no "dose now") — this no-red / non-directive rule governs the PK concentration chart, **not** the adherence calendar, where colour is a factual record of logged-vs-scheduled doses; staleness neutral ("last logged 4 days ago"); privacy-mode blur as global state; a patient switcher when a user has more than one patient.
 
 ---
 

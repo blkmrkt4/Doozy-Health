@@ -48,7 +48,7 @@ export default async function ExportPage({
         </h1>
 
         {exported ? (
-          <p className="rounded-md border border-green-900 bg-green-950/40 p-3 text-sm text-green-300">
+          <p className="rounded-md border alert-success p-3 text-sm">
             Export recorded.
           </p>
         ) : null}

@@ -187,6 +187,67 @@ export type SyringeSpec = {
   unit_markings: string;
 };
 
+// Inventory item — supplies on hand (syringes for now), not a medication.
+// Mirrors the inventory_items table (migration 20260605000001).
+export type InventoryItem = {
+  id: string;
+  patient_id: string;
+  category: "syringe";
+  label: string;
+  spec: Partial<SyringeSpec>;
+  photo_document_id: string | null;
+  archived: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+// ── Diary / tracked fields (PRD §5.9) ───────────────────────────────────────
+export const FIELD_TYPES = [
+  "number",
+  "scale_1_10",
+  "boolean",
+  "freetext",
+  "category",
+  "multiselect",
+] as const;
+export type FieldType = (typeof FIELD_TYPES)[number];
+
+export const FIELD_TYPE_LABELS: Record<FieldType, string> = {
+  number: "Number",
+  scale_1_10: "1–10 scale",
+  boolean: "Yes / No",
+  freetext: "Free text",
+  category: "Single choice",
+  multiselect: "Multiple choice",
+};
+
+export function isFieldType(v: string): v is FieldType {
+  return (FIELD_TYPES as readonly string[]).includes(v);
+}
+
+export type TrackedField = {
+  id: string;
+  patient_id?: string;
+  name: string;
+  field_type: FieldType;
+  unit: string | null;
+  category_options: string[] | null;
+  display_order?: number;
+  active?: boolean;
+  /** medication_ids this field is scoped to; empty = applies to all (general). */
+  medicationIds?: string[];
+};
+
+export type DiaryFieldValue = string | number | boolean | string[] | null;
+
+export type DiaryEntry = {
+  id: string;
+  entry_at: string;
+  entry_date: string | null;
+  field_values: Record<string, DiaryFieldValue>;
+  note: string | null;
+};
+
 // ── Type guards / validators (defensive — never trust jsonb blindly) ────────
 export function isRoute(v: unknown): v is Route {
   return typeof v === "string" && (ROUTES as readonly string[]).includes(v);

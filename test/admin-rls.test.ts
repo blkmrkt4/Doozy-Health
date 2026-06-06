@@ -115,7 +115,8 @@ describe.skipIf(!STACK_READY)("admin backend RLS", () => {
       .select("slug, status")
       .order("slug");
     expect(error).toBeNull();
-    expect(data!.length).toBe(7);
+    // 7 original seed prompts + extract_syringe (migration 20260605000003).
+    expect(data!.length).toBe(8);
     // Seed prompts may be active or disabled depending on setup.
     for (const row of data!) {
       expect(["active", "disabled"]).toContain(row.status);
@@ -155,7 +156,8 @@ describe.skipIf(!STACK_READY)("admin backend RLS", () => {
       .from("prompt_bindings")
       .select("*");
     expect(error).toBeNull();
-    expect(data!.length).toBe(7);
+    // 7 original + extract_syringe (migration 20260605000003).
+    expect(data!.length).toBe(8);
   });
 
   // ── llm_call_logs: admin-only ──

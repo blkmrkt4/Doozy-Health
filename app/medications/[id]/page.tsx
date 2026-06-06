@@ -4,27 +4,47 @@ import { createClient } from "@/lib/supabase/server";
 import {
   formatDose,
   formatFrequency,
+  formatRegimenSummary,
   formatRoute,
   relativeAge,
 } from "@/lib/format";
 import {
+  resolveParams,
+  buildMedicationPkSeries,
+  type DoseEvent,
+} from "@/lib/pharmacokinetics";
+import { PkChart } from "./timeline/pk-chart";
+import {
   FORM_TYPE_LABELS,
   INJECTABLE_FORM_TYPES,
+  isFrequency,
   type FormType,
+  type TrackedField,
+  type DiaryEntry,
 } from "@/lib/types";
+import {
+  buildWheelModel,
+  type MedRegimen,
+  type TakenLog,
+  type WheelModel,
+  type DayLog,
+  type MedLogMeta,
+} from "@/lib/adherence";
+import { CalendarSection } from "@/app/_components/calendar-section";
+import { MedDoseRow } from "@/app/_components/med-dose-row";
+import { dayKey } from "@/lib/schedule";
 import { checkInteractions, type InteractionRecord } from "@/lib/interactions";
 import { InteractionCard } from "@/app/medications/_components/interaction-card";
 import {
-  archiveMedication,
   attachMedicationPhoto,
   deleteDocument,
   deleteDoseLog,
   enableSchedule,
   disableSchedule,
-  logScheduledDose,
   runVerification,
   setMedicationPrivacy,
 } from "@/app/medications/actions";
+import { RemoveMedicationControls } from "./_components/remove-medication";
 import {
   DOCUMENTS_BUCKET,
   DOCUMENT_TYPES,
@@ -55,6 +75,12 @@ type DeliveryForm = {
     per_volume: number;
     volume_unit: string;
   } | null;
+  syringe_spec: {
+    capacity_mL?: number;
+    needle_gauge?: number;
+    needle_length_in?: number;
+    unit_markings?: string;
+  } | null;
   package_count: string | null;
   package_unit: string | null;
   expiry_date: string | null;
@@ -71,6 +97,7 @@ type Medication = {
   is_private: boolean;
   entry_source: string;
   archived: boolean;
+  syringe_id: string | null;
   prescribed_regimens: Regimen[] | null;
   delivery_forms: DeliveryForm[] | null;
   chosen_regimens: Regimen[] | null;
@@ -96,10 +123,10 @@ export default async function MedicationDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; new?: string }>;
+  searchParams: Promise<{ error?: string; new?: string; day?: string }>;
 }) {
   const { id } = await params;
-  const { error: errorParam, new: isNew } = await searchParams;
+  const { error: errorParam, new: isNew, day: selectedDayParam } = await searchParams;
 
   const supabase = await createClient();
   const {
@@ -110,7 +137,7 @@ export default async function MedicationDetailPage({
   const { data } = await supabase
     .from("medications")
     .select(
-      "id, patient_id, display_name, canonical_drug_id, is_private, entry_source, archived, prescribed_regimens(*), delivery_forms(*), chosen_regimens(*)"
+      "id, patient_id, display_name, canonical_drug_id, is_private, entry_source, archived, colour, syringe_id, prescribed_regimens(*), delivery_forms(*), chosen_regimens(*)"
     )
     .eq("id", id)
     .maybeSingle();
@@ -139,6 +166,21 @@ export default async function MedicationDetailPage({
     ? INJECTABLE_FORM_TYPES.has(delivery.form_type as FormType)
     : false;
 
+  // The chosen syringe (inventory) drives the calibrated visual size; fall back
+  // to the delivery form's spec, then 1 mL (PRD §5.1).
+  let linkedSyringeCapacityMl: number | null = null;
+  if (med.syringe_id) {
+    const { data: syr } = await supabase
+      .from("inventory_items")
+      .select("spec")
+      .eq("id", med.syringe_id)
+      .maybeSingle();
+    const spec = (syr?.spec ?? null) as { capacity_mL?: number } | null;
+    linkedSyringeCapacityMl = spec?.capacity_mL ?? null;
+  }
+  const resolvedCapacityMl =
+    linkedSyringeCapacityMl ?? delivery?.syringe_spec?.capacity_mL ?? null;
+
   // Recent dose history (RLS-scoped to this medication's visibility).
   const { data: logData } = await supabase
     .from("dose_logs")
@@ -147,6 +189,159 @@ export default async function MedicationDetailPage({
     .order("logged_at", { ascending: false })
     .limit(50);
   const logs = logData ?? [];
+
+  // Total logged doses — drives the archive-vs-delete guidance (history present
+  // → archiving is the safer default). Counted separately since `logs` is capped.
+  const { count: doseCountRaw } = await supabase
+    .from("dose_logs")
+    .select("id", { count: "exact", head: true })
+    .eq("medication_id", med.id)
+    .eq("event_type", "taken");
+  const doseCount = doseCountRaw ?? 0;
+
+  // Single-medication calendar (PRD §5.4): the date-wheel + adherence heatmap
+  // for this medication. The grade is a factual record of logged-vs-scheduled.
+  let medWheel: WheelModel | null = null;
+  if (chosen && isFrequency(chosen.frequency)) {
+    const anchorMs = new Date(
+      (chosen as { created_at?: string }).created_at ?? Date.now()
+    ).getTime();
+    const reg: MedRegimen = {
+      medicationId: med.id,
+      frequency: chosen.frequency,
+      anchorMs,
+      doseAmount: Number(chosen.dose_amount),
+      doseUnit: chosen.dose_unit,
+      colour: (med as { colour?: string | null }).colour ?? "#777777",
+    };
+    const taken: TakenLog[] = logs
+      .filter((l) => l.event_type === "taken")
+      .map((l) => ({
+        medicationId: med.id,
+        loggedAtMs: new Date(l.logged_at as string).getTime(),
+        amount: l.amount != null ? Number(l.amount) : null,
+        unit: (l.unit as string | null) ?? null,
+      }));
+    medWheel = buildWheelModel({
+      nowMs: Date.now(),
+      rangeDays: 50,
+      regimens: [reg],
+      takenLogs: taken,
+    });
+  }
+
+  // Per-day logs + log-control context for the calendar agenda (backdate/delete).
+  const calendarDayLogs: DayLog[] = logs.map((l) => ({
+    id: l.id as string,
+    medId: med.id,
+    loggedAtMs: new Date(l.logged_at as string).getTime(),
+    eventType: l.event_type as DayLog["eventType"],
+    amount: l.amount != null ? Number(l.amount) : null,
+    unit: (l.unit as string | null) ?? null,
+  }));
+  const calendarMedMeta: Record<string, MedLogMeta> = {};
+  if (chosen) {
+    calendarMedMeta[med.id] = {
+      medId: med.id,
+      name: med.display_name,
+      colour: (med as { colour?: string | null }).colour ?? "#777777",
+      defaultAmount: Number(chosen.dose_amount),
+      defaultUnit: chosen.dose_unit,
+      defaultRoute: chosen.route,
+      isInjectable,
+      concentrationAmount: delivery?.concentration?.amount ?? null,
+      concentrationPerVolume: delivery?.concentration?.per_volume ?? null,
+      syringeCapacityMl: resolvedCapacityMl,
+    };
+  }
+
+  // Today's mark + taken-log ids, for the streamlined check-dot logger at the
+  // top of the page (replaces the old "Taken now" button).
+  const todayDay = medWheel ? medWheel.days[medWheel.todayIndex] : null;
+  const todayMark = todayDay?.meds.find((x) => x.medId === med.id);
+  const todayTakenIds = todayDay
+    ? calendarDayLogs
+        .filter((l) => l.eventType === "taken" && dayKey(l.loggedAtMs) === todayDay.key)
+        .sort((a, b) => a.loggedAtMs - b.loggedAtMs)
+        .map((l) => l.id)
+    : [];
+
+  // Diary (PRD §5.9): patient-wide active fields + scope links + daily entries.
+  let diaryFields: TrackedField[] = [];
+  const diaryEntriesByDay = new Map<string, DiaryEntry>();
+  {
+    const { data: tfRows } = await supabase
+      .from("tracked_fields")
+      .select("id, name, field_type, unit, category_options, display_order")
+      .eq("patient_id", med.patient_id)
+      .eq("active", true)
+      .order("display_order");
+    const { data: tfmRows } = await supabase
+      .from("tracked_field_medications")
+      .select("tracked_field_id, medication_id")
+      .eq("patient_id", med.patient_id);
+    const tfMeds = new Map<string, string[]>();
+    for (const r of (tfmRows ?? []) as { tracked_field_id: string; medication_id: string }[]) {
+      const a = tfMeds.get(r.tracked_field_id) ?? [];
+      a.push(r.medication_id);
+      tfMeds.set(r.tracked_field_id, a);
+    }
+    diaryFields = ((tfRows ?? []) as TrackedField[]).map((f) => ({
+      ...f,
+      medicationIds: tfMeds.get(f.id) ?? [],
+    }));
+    const { data: deRows } = await supabase
+      .from("diary_entries")
+      .select("id, entry_at, entry_date, field_values, note")
+      .eq("patient_id", med.patient_id)
+      .not("entry_date", "is", null);
+    for (const e of (deRows ?? []) as DiaryEntry[]) {
+      if (e.entry_date) diaryEntriesByDay.set(e.entry_date, e);
+    }
+  }
+
+  // Inline pharmacokinetic sparkline (PRD §5.7): illustrative modelled level
+  // from logged doses, with the chosen schedule as the "where you'd sit"
+  // reference. Deterministic — no LLM (rule #8). Only for linear drugs with PK
+  // reference data; the full chart with axes/calibration is on /timeline.
+  let pkSeries: ReturnType<typeof buildMedicationPkSeries> | null = null;
+  if (med.canonical_drug_id && chosen && isFrequency(chosen.frequency)) {
+    const { data: drug } = await supabase
+      .from("drugs")
+      .select(
+        "half_life_hours, half_life_range_hours, bioavailability, tmax_hours, " +
+          "kernel_by_route, release_duration_hours, is_linear, nonlinear_reason, metabolites"
+      )
+      .eq("id", med.canonical_drug_id)
+      .single();
+    const params = drug
+      ? resolveParams(
+          drug as unknown as Parameters<typeof resolveParams>[0],
+          chosen.route
+        )
+      : null;
+    if (params && params.isLinear) {
+      const now = Date.now();
+      const pastMs = now - 30 * 24 * 3_600_000;
+      const doseEvents: DoseEvent[] = logs
+        .filter((l) => (l.event_type === "taken" || l.event_type === "prn") && l.amount)
+        .map((l) => ({
+          timestamp: new Date(l.logged_at as string).getTime(),
+          amount: Number(l.amount),
+        }))
+        .filter((d) => d.timestamp >= pastMs);
+      pkSeries = buildMedicationPkSeries({
+        params,
+        doseEvents,
+        now,
+        pastDays: 30,
+        futureDays: 14,
+        scheduleFrequency: chosen.frequency,
+        scheduleDose: Number(chosen.dose_amount),
+        stepMs: 4 * 3_600_000,
+      });
+    }
+  }
 
   // Dose schedule (PRD §5.5). Shows whether reminders are enabled.
   const { data: scheduleData } = await supabase
@@ -207,27 +402,65 @@ export default async function MedicationDetailPage({
 
       <main className="mx-auto max-w-2xl px-6 py-10 space-y-6">
         <div>
-          <h1 className="text-xl font-medium tracking-tight">
-            {med.display_name}
-            {med.is_private ? (
-              <span className="ml-2 align-middle text-sm text-faint" title="Private">
-                🔒
-              </span>
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-medium tracking-tight">
+              <span className="blur-private">{med.display_name}</span>
+              {med.is_private ? (
+                <span className="ml-2 align-middle text-sm text-faint" title="Private">
+                  🔒
+                </span>
+              ) : null}
+            </h1>
+            {isOwner ? (
+              <Link
+                href={`/medications/${med.id}/edit`}
+                className="rounded-md border border-line px-3 py-1 text-xs text-muted transition-colors hover:bg-surface"
+              >
+                Edit
+              </Link>
             ) : null}
-          </h1>
-          {/* Timeline link — shown when drug has PK data (PRD §4.4, §5.7) */}
-          {med.canonical_drug_id ? (
-            <Link
-              href={`/medications/${med.id}/timeline`}
-              className="mt-1 inline-block text-sm text-accent hover:underline"
-            >
-              View timeline
-            </Link>
+          </div>
+          {chosen ? (
+            <p className="mt-1 tabular text-sm text-muted blur-private">
+              {formatRegimenSummary(chosen)}
+            </p>
           ) : null}
         </div>
 
+        {/* Inline modelled-level chart (PRD §5.7). Illustrative, labelled. */}
+        {pkSeries ? (
+          <section className="rounded-md border border-line bg-surface p-4">
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 className="text-sm font-medium text-paper">Modelled level</h2>
+              <Link
+                href={`/medications/${med.id}/timeline`}
+                className="text-xs text-accent hover:underline"
+              >
+                Full timeline →
+              </Link>
+            </div>
+            <p className="mb-3 mt-0.5 text-xs text-faint">
+              An illustration of how this medication builds up and clears, based
+              on textbook half-life — past 30 days and the next 14. The dashed
+              line is where you&rsquo;d sit if you follow your schedule.
+            </p>
+            <PkChart series={pkSeries.series} overlay={pkSeries.overlay} height={230} />
+            <p className="mt-3 text-[11px] text-faint">
+              Illustrative, not a measurement of your actual level. Not medical
+              advice.
+            </p>
+          </section>
+        ) : med.canonical_drug_id ? (
+          <Link
+            href={`/medications/${med.id}/timeline`}
+            className="inline-block text-sm text-accent hover:underline"
+          >
+            View timeline
+          </Link>
+        ) : null}
+
         {errorParam ? (
-          <p className="rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">
+          <p className="rounded-md border alert-error p-3 text-sm">
             {errorParam}
           </p>
         ) : null}
@@ -263,35 +496,55 @@ export default async function MedicationDetailPage({
         {/* Log a dose — the primary action. One tap for the scheduled dose;
             "Log differently" expands the custom/PRN/skip path (§4.3, §5.4). */}
         {canLog && chosen ? (
-          <section className="flex flex-wrap items-center gap-3 rounded-md border border-line p-4">
-            <form action={logScheduledDose}>
-              <input type="hidden" name="medication_id" value={med.id} />
-              <input type="hidden" name="return_to" value={`/medications/${med.id}`} />
-              <button
-                type="submit"
-                className="rounded-md bg-accent px-5 py-2.5 text-sm font-medium text-ink transition-opacity hover:opacity-90"
-              >
-                Taken now
-              </button>
-            </form>
-            {/* Calibrated syringe visual for injectables (PRD §4.3, §9) */}
-            {isInjectable && delivery?.concentration && delivery.concentration.amount ? (
-              <SyringeVisual
-                doseAmount={Number(chosen.dose_amount)}
-                concentrationAmount={delivery.concentration.amount}
-                concentrationPerVolume={delivery.concentration.per_volume ?? 1}
-                syringeCapacityMl={1} // default; real value from syringe_spec if available
-              />
-            ) : null}
-            <LogDoseForm
-              medicationId={med.id}
-              defaultAmount={String(chosen.dose_amount)}
-              defaultUnit={chosen.dose_unit}
-              defaultRoute={chosen.route}
-              isInjectable={isInjectable}
-              isPatch={delivery?.form_type === "patch"}
+          <section className="space-y-4 rounded-md border border-line p-4">
+            {/* Today — tap the green dot(s) to log; the dose is editable. */}
+            <MedDoseRow
+              meta={calendarMedMeta[med.id]}
+              medColour={(med as { colour?: string | null }).colour ?? "#777777"}
+              medName="Today"
+              scheduled={todayMark?.scheduled ?? 0}
+              logged={todayMark?.logged ?? 0}
+              logIds={todayTakenIds}
+              dayMs={todayDay?.ms ?? Date.now()}
+              isToday={true}
+              canLog={canLog}
+              minDots={1}
             />
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Calibrated syringe visual for injectables (PRD §4.3, §9) */}
+              {isInjectable && delivery?.concentration && delivery.concentration.amount ? (
+                <SyringeVisual
+                  doseAmount={Number(chosen.dose_amount)}
+                  concentrationAmount={delivery.concentration.amount}
+                  concentrationPerVolume={delivery.concentration.per_volume ?? 1}
+                  syringeCapacityMl={resolvedCapacityMl ?? 1}
+                />
+              ) : null}
+              <LogDoseForm
+                medicationId={med.id}
+                defaultAmount={String(chosen.dose_amount)}
+                defaultUnit={chosen.dose_unit}
+                defaultRoute={chosen.route}
+                isInjectable={isInjectable}
+                isPatch={delivery?.form_type === "patch"}
+              />
+            </div>
           </section>
+        ) : null}
+
+        {/* Medication calendar (PRD §5.4): date-wheel + adherence heatmap for
+            this medication. */}
+        {medWheel ? (
+          <CalendarSection
+            model={medWheel}
+            medNames={{ [med.id]: med.display_name }}
+            dayLogs={calendarDayLogs}
+            medMeta={calendarMedMeta}
+            canLog={canLog}
+            initialDayKey={selectedDayParam}
+            diaryFields={diaryFields}
+            diaryEntriesByDay={diaryEntriesByDay}
+          />
         ) : null}
 
         {/* Directions as captured — plain-language instructions a caregiver can
@@ -539,7 +792,7 @@ export default async function MedicationDetailPage({
               />
               <button
                 type="submit"
-                className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-ink transition-opacity hover:opacity-90"
+                className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent transition-opacity hover:opacity-90"
               >
                 Attach
               </button>
@@ -628,15 +881,7 @@ export default async function MedicationDetailPage({
                 </button>
               </form>
             )}
-            <form action={archiveMedication}>
-              <input type="hidden" name="medication_id" value={med.id} />
-              <button
-                type="submit"
-                className="rounded-md border border-line px-4 py-2 text-sm text-muted transition-colors hover:bg-surface"
-              >
-                Archive
-              </button>
-            </form>
+            <RemoveMedicationControls medicationId={med.id} doseCount={doseCount} />
           </section>
         ) : null}
       </main>

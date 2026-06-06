@@ -49,7 +49,7 @@ export default async function LoginPage({
             ) : null}
             <button
               type="submit"
-              className="block w-full rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-ink transition-opacity hover:opacity-90"
+              className="block w-full rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-on-accent transition-opacity hover:opacity-90"
             >
               Send sign-in link
             </button>

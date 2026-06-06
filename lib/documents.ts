@@ -18,6 +18,7 @@ export const DOCUMENT_TYPES = [
   "patch_box",
   "pill_bottle",
   "lab_result",
+  "syringe_packaging",
   "other",
 ] as const;
 export type DocumentType = (typeof DOCUMENT_TYPES)[number];
@@ -28,6 +29,7 @@ export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
   patch_box: "Patch box",
   pill_bottle: "Pill bottle",
   lab_result: "Lab result",
+  syringe_packaging: "Syringe packaging",
   other: "Other",
 };
 

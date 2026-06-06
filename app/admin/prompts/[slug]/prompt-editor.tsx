@@ -9,7 +9,7 @@ const inputCls =
 const labelCls = "block text-sm text-muted";
 const sectionCls = "rounded-md border border-line p-4 space-y-4";
 const btnPrimary =
-  "rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-ink transition-opacity hover:opacity-90";
+  "rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-on-accent transition-opacity hover:opacity-90";
 const btnSecondary =
   "rounded-md border border-line px-4 py-2 text-sm text-muted transition-colors hover:bg-surface";
 

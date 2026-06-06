@@ -24,8 +24,16 @@ export const viewport: Viewport = {
   initialScale: 1,
   // Edge-to-edge on iOS without locking out accessibility pinch-zoom.
   viewportFit: "cover",
-  themeColor: "#000000",
+  // PWA chrome follows the OS preference; the in-app toggle overrides the page.
+  themeColor: [
+    { media: "(prefers-color-scheme: dark)", color: "#000000" },
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+  ],
 };
+
+// Applied before first paint to avoid a flash of the wrong theme: honour the
+// stored choice, else fall back to the OS preference.
+const THEME_INIT = `(function(){try{var t=localStorage.getItem('theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}document.documentElement.setAttribute('data-theme',t);}catch(e){}})();`;
 
 export default function RootLayout({
   children,
@@ -33,7 +41,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en-GB">
+    <html lang="en-GB" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
+      </head>
       <body className="flex min-h-screen flex-col bg-ink text-paper antialiased">
         {/* The disclaimer footer is global so it cannot be omitted from any
             screen — PRD §6.1 requires it everywhere. */}

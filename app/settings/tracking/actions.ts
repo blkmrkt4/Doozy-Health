@@ -20,7 +20,9 @@ const VALID_TYPES = new Set([
   "boolean",
   "freetext",
   "category",
+  "multiselect",
 ]);
+const OPTION_TYPES = new Set(["category", "multiselect"]);
 
 // ── Tracked field management ───────────────────────────────────────────────
 
@@ -42,15 +44,23 @@ export async function createTrackedField(formData: FormData) {
 
   const unit = str(formData, "unit") || null;
 
-  let categoryOptions = null;
-  if (fieldType === "category") {
-    const raw = str(formData, "category_options");
-    if (!raw) fail("Category fields need at least one option.");
-    categoryOptions = raw
-      .split(",")
-      .map((s) => s.trim())
+  let categoryOptions: string[] | null = null;
+  if (OPTION_TYPES.has(fieldType)) {
+    // Prefer the per-option inputs (custom form's "+ add option"); fall back to
+    // the comma-separated value (library presets).
+    const fromList = formData
+      .getAll("option")
+      .map((v) => String(v).trim())
       .filter(Boolean);
-    if (categoryOptions.length === 0) fail("Enter at least one category option.");
+    if (fromList.length > 0) {
+      categoryOptions = fromList;
+    } else {
+      categoryOptions = str(formData, "category_options")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
+    if (categoryOptions.length === 0) fail("Choice fields need at least one option.");
   }
 
   // Get the next display_order.
@@ -64,16 +74,35 @@ export async function createTrackedField(formData: FormData) {
   const nextOrder =
     ((existing?.[0]?.display_order as number | undefined) ?? -1) + 1;
 
-  const { error } = await supabase.from("tracked_fields").insert({
-    patient_id: active.id,
-    name,
-    field_type: fieldType,
-    unit,
-    category_options: categoryOptions,
-    display_order: nextOrder,
-  });
+  const { data: created, error } = await supabase
+    .from("tracked_fields")
+    .insert({
+      patient_id: active.id,
+      name,
+      field_type: fieldType,
+      unit,
+      category_options: categoryOptions,
+      display_order: nextOrder,
+    })
+    .select("id")
+    .single();
 
-  if (error) fail(`Could not create field: ${error.message}`);
+  if (error || !created) fail(`Could not create field: ${error?.message ?? ""}`);
+
+  // Per-medication scoping (PRD §5.9). No selection = applies to all (general).
+  const medIds = formData
+    .getAll("medication_ids")
+    .map((v) => String(v))
+    .filter(Boolean);
+  if (medIds.length > 0) {
+    await supabase.from("tracked_field_medications").insert(
+      medIds.map((medication_id) => ({
+        tracked_field_id: created.id as string,
+        medication_id,
+        patient_id: active.id,
+      }))
+    );
+  }
 
   revalidatePath("/settings/tracking");
   redirect("/settings/tracking?success=Field+created");

@@ -1,8 +1,10 @@
 @import "tailwindcss";
 
 /*
- * ByZyB palette (PRD §9): calm, dense, monochrome on black with a single
- * electric-yellow accent. No celebratory colour, no red "danger" zones.
+ * ByZyB palette (PRD §9): calm, dense, monochrome with a single electric-yellow
+ * accent. No celebratory colour, no red "danger" zones. Ships in two themes —
+ * dark (default) and light (data-theme="light" on <html>, for readers who prefer
+ * it). The accent stays electric yellow in both; on-accent text stays dark.
  */
 @theme {
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
@@ -10,18 +12,65 @@
 
   /* Single accent — ByZyB electric yellow. Used sparingly. */
   --color-accent: #f4ee35;
+  /* Text/icons placed on the accent (or compliance) fill — dark in BOTH themes
+     because the accent is yellow in both. Decoupled from --color-ink so the page
+     background can flip without making accent buttons unreadable. */
+  --color-on-accent: #141104;
 
-  /* Monochrome ramp on black. */
+  /* Monochrome ramp — dark theme (default). */
   --color-ink: #000000; /* page background */
   --color-paper: #ffffff; /* primary text */
   --color-muted: #cccccc; /* secondary text */
   --color-faint: #777777; /* tertiary / de-emphasised */
   --color-line: #262626; /* hairline borders */
   --color-surface: #0e0e0e; /* raised panels */
+
+  /* Status accents (banners) — theme-adaptive via the vars below. */
+  --color-danger-bg: rgba(127, 29, 29, 0.25);
+  --color-danger-text: #fca5a5;
+  --color-danger-line: #7f1d1d;
+  --color-ok-bg: rgba(20, 83, 45, 0.28);
+  --color-ok-text: #86efac;
+  --color-ok-line: #166534;
 }
 
 :root {
   color-scheme: dark;
+}
+
+/* Light theme — same semantic tokens, inverted ramp. Higher specificity than
+   the @theme :root block, so the utilities (bg-ink, text-paper, …) pick up these
+   values automatically wherever data-theme="light". */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --color-ink: #ffffff;
+  --color-paper: #141414;
+  --color-muted: #444444;
+  --color-faint: #6b6b6b;
+  --color-line: #e3e3e3;
+  --color-surface: #f5f5f6;
+
+  --color-danger-bg: #fef2f2;
+  --color-danger-text: #b91c1c;
+  --color-danger-line: #fecaca;
+  --color-ok-bg: #f0fdf4;
+  --color-ok-text: #15803d;
+  --color-ok-line: #bbf7d0;
+}
+
+/* Status banners (PRD §6.1 error/success). Plain (un-layered) rules so they win
+   over Tailwind utility classes regardless of source order — replaces the old
+   hard-coded red-/green-palette combos so they read in both themes. */
+.alert-error {
+  background-color: var(--color-danger-bg);
+  border-color: var(--color-danger-line);
+  color: var(--color-danger-text);
+}
+.alert-success {
+  background-color: var(--color-ok-bg);
+  border-color: var(--color-ok-line);
+  color: var(--color-ok-text);
 }
 
 html,

@@ -74,12 +74,12 @@ export default async function CaregiversPage({
         <h1 className="text-xl font-medium tracking-tight">Caregivers</h1>
 
         {error ? (
-          <p className="rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">
+          <p className="rounded-md border alert-error p-3 text-sm">
             {error}
           </p>
         ) : null}
         {success ? (
-          <p className="rounded-md border border-green-900 bg-green-950/40 p-3 text-sm text-green-300">
+          <p className="rounded-md border alert-success p-3 text-sm">
             {success}
           </p>
         ) : null}
@@ -192,7 +192,7 @@ export default async function CaregiversPage({
             </div>
             <button
               type="submit"
-              className="rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-ink transition-opacity hover:opacity-90"
+              className="rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-on-accent transition-opacity hover:opacity-90"
             >
               Send invite
             </button>

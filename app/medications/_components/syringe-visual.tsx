@@ -71,7 +71,7 @@ export function SyringeVisual({
           width={4}
           height={BARREL_TOP - 4}
           rx={2}
-          fill="#777777"
+          fill="var(--color-faint)"
         />
         <rect
           x={BARREL_LEFT + 2}
@@ -79,7 +79,7 @@ export function SyringeVisual({
           width={BARREL_WIDTH - 4}
           height={4}
           rx={1}
-          fill="#777777"
+          fill="var(--color-faint)"
         />
 
         {/* Barrel outline */}
@@ -90,7 +90,7 @@ export function SyringeVisual({
           height={barrelHeight}
           rx={2}
           fill="none"
-          stroke="#262626"
+          stroke="var(--color-faint)"
           strokeWidth={1.5}
         />
 
@@ -123,7 +123,7 @@ export function SyringeVisual({
               y1={m.y}
               x2={BARREL_LEFT + BARREL_WIDTH + 6}
               y2={m.y}
-              stroke="#555555"
+              stroke="var(--color-faint)"
               strokeWidth={0.5}
             />
             <text
@@ -142,14 +142,14 @@ export function SyringeVisual({
           y1={BARREL_BOTTOM}
           x2={SYRINGE_WIDTH / 2}
           y2={SYRINGE_HEIGHT - 4}
-          stroke="#cccccc"
+          stroke="var(--color-muted)"
           strokeWidth={1}
         />
         <circle
           cx={SYRINGE_WIDTH / 2}
           cy={SYRINGE_HEIGHT - 3}
           r={1}
-          fill="#cccccc"
+          fill="var(--color-muted)"
         />
       </svg>
 

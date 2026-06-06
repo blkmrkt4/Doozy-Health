@@ -7,20 +7,12 @@ import {
   updateTrackedField,
   deleteTrackedField,
 } from "./actions";
+import { DIARY_PRESETS } from "@/lib/diary-presets";
+import { FIELD_TYPE_LABELS, type FieldType } from "@/lib/types";
+import { TrackedFieldForm } from "./tracked-field-form";
 
 // Tracked fields settings page (PRD §5.9, §13.15). Owner-only.
 // Configure per-patient custom tracking fields (mood, sleep, pain, etc.).
-
-const FIELD_TYPES = [
-  { value: "scale_1_10", label: "Scale (1–10)" },
-  { value: "number", label: "Number" },
-  { value: "boolean", label: "Yes / No" },
-  { value: "freetext", label: "Free text" },
-  { value: "category", label: "Category" },
-] as const;
-
-const inputCls =
-  "block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent";
 
 export default async function TrackingSettingsPage({
   searchParams,
@@ -53,6 +45,37 @@ export default async function TrackingSettingsPage({
     display_order: number;
   }>;
 
+  // Medications (for the "applies to" picker + field tags) and the scope links.
+  const { data: medRows } = await supabase
+    .from("medications")
+    .select("id, display_name")
+    .eq("patient_id", active.id)
+    .eq("archived", false)
+    .order("created_at");
+  const meds = (medRows ?? []) as { id: string; display_name: string }[];
+  const medNameById = new Map(meds.map((m) => [m.id, m.display_name]));
+
+  const { data: tfmRows } = await supabase
+    .from("tracked_field_medications")
+    .select("tracked_field_id, medication_id");
+  const tagsByField = new Map<string, string[]>();
+  for (const r of (tfmRows ?? []) as { tracked_field_id: string; medication_id: string }[]) {
+    const nm = medNameById.get(r.medication_id);
+    if (!nm) continue;
+    const arr = tagsByField.get(r.tracked_field_id) ?? [];
+    arr.push(nm);
+    tagsByField.set(r.tracked_field_id, arr);
+  }
+
+  // Library grouped in display order, hiding presets already added (by name).
+  const existingNames = new Set(
+    trackedFields.map((f) => f.name.trim().toLowerCase())
+  );
+  const libraryGroups: string[] = [];
+  for (const p of DIARY_PRESETS) {
+    if (!libraryGroups.includes(p.group)) libraryGroups.push(p.group);
+  }
+
   return (
     <div className="min-h-full">
       <header className="border-b border-line">
@@ -68,19 +91,19 @@ export default async function TrackingSettingsPage({
       </header>
 
       <main className="mx-auto max-w-2xl px-6 py-10 space-y-6">
-        <h1 className="text-xl font-medium tracking-tight">Tracking fields</h1>
+        <h1 className="text-xl font-medium tracking-tight">Diary tracking fields</h1>
         <p className="text-sm text-faint">
-          Configure what you want to track alongside your doses — mood, sleep,
-          symptoms, or anything else. No defaults are imposed.
+          Choose what to track in your diary — mood, sleep, symptoms, or anything
+          else. No defaults are imposed.
         </p>
 
         {error ? (
-          <p className="rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">
+          <p className="rounded-md border alert-error p-3 text-sm">
             {error}
           </p>
         ) : null}
         {success ? (
-          <p className="rounded-md border border-green-900 bg-green-950/40 p-3 text-sm text-green-300">
+          <p className="rounded-md border alert-success p-3 text-sm">
             {success}
           </p>
         ) : null}
@@ -88,6 +111,17 @@ export default async function TrackingSettingsPage({
         {/* Current fields */}
         <section className="rounded-md border border-line p-4 space-y-3">
           <h2 className="text-sm font-medium text-paper">Your fields</h2>
+
+          {/* Add your own — opens as a twisty at the top of the list. */}
+          <details className="rounded-md border border-line">
+            <summary className="cursor-pointer list-none px-3 py-2 text-sm text-accent hover:underline">
+              + Add your own
+            </summary>
+            <div className="border-t border-line p-3">
+              <TrackedFieldForm meds={meds} />
+            </div>
+          </details>
+
           {trackedFields.length === 0 ? (
             <p className="text-sm text-faint">No fields configured yet.</p>
           ) : (
@@ -113,6 +147,11 @@ export default async function TrackingSettingsPage({
                       {f.category_options
                         ? `: ${(f.category_options as string[]).join(", ")}`
                         : null}
+                    </p>
+                    <p className="text-[11px] text-faint">
+                      {tagsByField.get(f.id)?.length
+                        ? `for: ${tagsByField.get(f.id)!.join(", ")}`
+                        : "all medications"}
                     </p>
                   </div>
                   <div className="flex shrink-0 gap-2">
@@ -146,75 +185,59 @@ export default async function TrackingSettingsPage({
           )}
         </section>
 
-        {/* Add field form */}
-        <section className="rounded-md border border-line p-4 space-y-3">
-          <h2 className="text-sm font-medium text-paper">Add a field</h2>
-          <form action={createTrackedField} className="space-y-3">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label htmlFor="name" className="block text-sm text-muted">
-                  Name
-                </label>
-                <input
-                  id="name"
-                  name="name"
-                  required
-                  placeholder="e.g. Mood, Sleep, Pain"
-                  className={`${inputCls} mt-1`}
-                />
-              </div>
-              <div>
-                <label htmlFor="field_type" className="block text-sm text-muted">
-                  Type
-                </label>
-                <select
-                  id="field_type"
-                  name="field_type"
-                  defaultValue="scale_1_10"
-                  className={`${inputCls} mt-1`}
-                >
-                  {FIELD_TYPES.map((t) => (
-                    <option key={t.value} value={t.value}>
-                      {t.label}
-                    </option>
+        {/* Library — one row per field, grouped; "Add" to start tracking it. */}
+        <section className="rounded-md border border-line p-4 space-y-4">
+          <h2 className="text-sm font-medium text-paper">Add from the library</h2>
+          {libraryGroups.map((group) => {
+            const items = DIARY_PRESETS.filter(
+              (p) => p.group === group && !existingNames.has(p.name.toLowerCase())
+            );
+            if (items.length === 0) return null;
+            return (
+              <div key={group}>
+                <p className="mb-1 text-[11px] uppercase tracking-wide text-faint">
+                  {group}
+                </p>
+                <ul className="divide-y divide-line">
+                  {items.map((p) => (
+                    <li
+                      key={p.name}
+                      className="flex items-center justify-between gap-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm text-paper">{p.name}</p>
+                        <p className="text-xs text-faint">
+                          {FIELD_TYPE_LABELS[p.field_type as FieldType]}
+                          {p.unit ? ` · ${p.unit}` : ""}
+                          {p.category_options
+                            ? `: ${p.category_options.join(", ")}`
+                            : ""}
+                        </p>
+                      </div>
+                      <form action={createTrackedField} className="shrink-0">
+                        <input type="hidden" name="name" value={p.name} />
+                        <input type="hidden" name="field_type" value={p.field_type} />
+                        {p.unit ? <input type="hidden" name="unit" value={p.unit} /> : null}
+                        {p.category_options ? (
+                          <input
+                            type="hidden"
+                            name="category_options"
+                            value={p.category_options.join(", ")}
+                          />
+                        ) : null}
+                        <button
+                          type="submit"
+                          className="rounded-md border border-line px-3 py-1 text-xs text-muted transition-colors hover:bg-surface"
+                        >
+                          Add
+                        </button>
+                      </form>
+                    </li>
                   ))}
-                </select>
+                </ul>
               </div>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label htmlFor="unit" className="block text-sm text-muted">
-                  Unit (optional)
-                </label>
-                <input
-                  id="unit"
-                  name="unit"
-                  placeholder="e.g. hours, mg"
-                  className={`${inputCls} mt-1`}
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="category_options"
-                  className="block text-sm text-muted"
-                >
-                  Category options (comma-separated)
-                </label>
-                <input
-                  id="category_options"
-                  name="category_options"
-                  placeholder="e.g. Tension, Migraine, Cluster"
-                  className={`${inputCls} mt-1`}
-                />
-              </div>
-            </div>
-            <button
-              type="submit"
-              className="rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-ink transition-opacity hover:opacity-90"
-            >
-              Add field
-            </button>
-          </form>
+            );
+          })}
         </section>
       </main>
     </div>

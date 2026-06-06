@@ -50,11 +50,10 @@ export default async function SettingsPage() {
                 className="block rounded-md border border-line p-4 hover:border-muted"
               >
                 <h2 className="text-sm font-medium text-paper">
-                  Tracking fields
+                  Diary tracking fields
                 </h2>
                 <p className="mt-1 text-xs text-faint">
-                  Configure what to track alongside doses — mood, sleep,
-                  symptoms.
+                  Choose what to track in your diary — mood, sleep, symptoms.
                 </p>
               </Link>
             </>

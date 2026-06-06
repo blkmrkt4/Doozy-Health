@@ -2,19 +2,35 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getActivePatient } from "@/lib/active-patient";
-import { DiaryFields } from "@/app/medications/_components/diary-fields";
-import { saveDiaryEntry, deleteDiaryEntry } from "./actions";
-import { relativeAge } from "@/lib/format";
+import { buildTrends, type TrendEntry } from "@/lib/diary-trends";
+import { isFieldType, type FieldType, type DiaryFieldValue } from "@/lib/types";
+import {
+  NumericChart,
+  BooleanStrip,
+  DistributionBars,
+} from "./_components/field-charts";
 
-// Free-standing diary page (PRD §5.9). Record how you are feeling without
-// attaching to a specific dose. Shows active tracked fields + history.
+// Diary summary page (PRD §5.9). Day-to-day logging happens on the dashboard
+// calendar's per-day Diary twisty; this page shows what's changing over time —
+// a chart and a range for each tracked field. A factual record of what was
+// logged, never advice. American English.
 
-export default async function DiaryPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ error?: string }>;
-}) {
-  const { error } = await searchParams;
+const WINDOW_DAYS = 90;
+
+function tidy(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
+}
+
+function shortDate(iso: string): string {
+  const [, m, d] = iso.split("-").map(Number);
+  const months = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ];
+  return `${d} ${months[(m ?? 1) - 1] ?? ""}`;
+}
+
+export default async function DiaryPage() {
   const supabase = await createClient();
   const {
     data: { user },
@@ -24,9 +40,7 @@ export default async function DiaryPage({
   const active = await getActivePatient(supabase);
   if (!active) redirect("/dashboard");
 
-  const canLog = active.role === "owner" || active.role === "caregiver";
-
-  // Load active tracked fields.
+  // Active tracked fields, in display order.
   const { data: fieldsData } = await supabase
     .from("tracked_fields")
     .select("id, name, field_type, unit, category_options")
@@ -34,41 +48,56 @@ export default async function DiaryPage({
     .eq("active", true)
     .order("display_order");
 
-  const fields = (fieldsData ?? []) as Array<{
-    id: string;
-    name: string;
-    field_type: string;
-    unit: string | null;
-    category_options: string[] | null;
-  }>;
+  const fields = (fieldsData ?? [])
+    .filter((f) => isFieldType(f.field_type as string))
+    .map((f) => ({
+      id: f.id as string,
+      name: f.name as string,
+      field_type: f.field_type as FieldType,
+      unit: (f.unit as string | null) ?? null,
+      category_options: (f.category_options as string[] | null) ?? null,
+    }));
 
-  // Load recent diary entries (last 20).
+  // Diary entries over the trailing window — daily (entry_date) and any older
+  // ad-hoc entries both carry entry_at, so we filter on that and derive the day.
+  const cutoff = new Date(Date.now() - WINDOW_DAYS * 86_400_000).toISOString();
   const { data: entriesData } = await supabase
     .from("diary_entries")
-    .select("id, entry_at, field_values, note, attached_dose_log_id")
+    .select("entry_at, entry_date, field_values, note")
     .eq("patient_id", active.id)
-    .order("entry_at", { ascending: false })
-    .limit(20);
+    .gte("entry_at", cutoff)
+    .order("entry_at", { ascending: true });
 
-  const entries = (entriesData ?? []) as Array<{
-    id: string;
+  const rows = (entriesData ?? []) as Array<{
     entry_at: string;
-    field_values: Record<string, unknown>;
+    entry_date: string | null;
+    field_values: Record<string, DiaryFieldValue>;
     note: string | null;
-    attached_dose_log_id: string | null;
   }>;
 
-  // Build a field name lookup for display.
-  const fieldNameMap = new Map(fields.map((f) => [f.id, f.name]));
+  const entries: TrendEntry[] = rows.map((r) => ({
+    date: r.entry_date ?? r.entry_at.slice(0, 10),
+    field_values: r.field_values ?? {},
+  }));
+
+  const trends = buildTrends(fields, entries);
+  const hasData = trends.some((t) => t.trend.kind !== "empty");
+
+  // Recent notes (most recent first), independent of any field.
+  const recentNotes = rows
+    .filter((r) => r.note && r.note.trim())
+    .map((r) => ({
+      date: r.entry_date ?? r.entry_at.slice(0, 10),
+      note: r.note as string,
+    }))
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+    .slice(0, 10);
 
   return (
     <div className="min-h-full">
       <header className="border-b border-line">
         <div className="mx-auto flex max-w-2xl items-center justify-between px-6 py-4">
-          <Link
-            href="/dashboard"
-            className="text-sm text-faint hover:text-muted"
-          >
+          <Link href="/dashboard" className="text-sm text-faint hover:text-muted">
             ← Dashboard
           </Link>
           <span className="text-sm text-muted">{active.name}</span>
@@ -76,109 +105,124 @@ export default async function DiaryPage({
       </header>
 
       <main className="mx-auto max-w-2xl px-6 py-10 space-y-6">
-        <h1 className="text-xl font-medium tracking-tight">Diary</h1>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-medium tracking-tight">Diary</h1>
+            <p className="mt-1 text-sm text-faint">
+              What you&rsquo;ve logged over the last {WINDOW_DAYS} days. Log each
+              day from the dashboard calendar.
+            </p>
+          </div>
+          {active.role === "owner" ? (
+            <Link
+              href="/settings/tracking"
+              className="shrink-0 rounded-md border border-line px-3 py-1.5 text-sm text-muted transition-colors hover:bg-surface"
+            >
+              Modify diary
+            </Link>
+          ) : null}
+        </div>
 
-        {error ? (
-          <p className="rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">
-            {error}
+        {fields.length === 0 ? (
+          <p className="rounded-md border border-line p-6 text-center text-sm text-faint">
+            No tracking fields configured yet.{" "}
+            {active.role === "owner" ? (
+              <Link href="/settings/tracking" className="text-accent hover:underline">
+                Set up fields
+              </Link>
+            ) : null}
           </p>
-        ) : null}
-
-        {/* Entry form */}
-        {canLog ? (
-          <section className="rounded-md border border-line p-4 space-y-4">
-            <h2 className="text-sm font-medium text-paper">
-              How are you feeling?
-            </h2>
-
-            {fields.length === 0 ? (
-              <p className="text-sm text-faint">
-                No tracking fields configured.{" "}
-                {active.role === "owner" ? (
-                  <Link
-                    href="/settings/tracking"
-                    className="text-accent hover:underline"
-                  >
-                    Set up fields
-                  </Link>
-                ) : null}
-              </p>
-            ) : (
-              <form action={saveDiaryEntry} className="space-y-4">
-                <input type="hidden" name="return_to" value="/diary" />
-                <DiaryFields fields={fields} />
-                <div>
-                  <label htmlFor="note" className="block text-sm text-muted">
-                    Note (optional)
-                  </label>
-                  <input
-                    id="note"
-                    name="note"
-                    type="text"
-                    placeholder="Anything else..."
-                    className="mt-1 block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  className="rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-ink transition-opacity hover:opacity-90"
+        ) : !hasData ? (
+          <p className="rounded-md border border-line p-6 text-center text-sm text-faint">
+            Nothing logged yet. Open a day on the dashboard calendar and tap the
+            Diary section to start recording.
+          </p>
+        ) : (
+          <section className="space-y-4">
+            {trends.map(({ field, trend }) => {
+              const unit = field.unit ? ` ${field.unit}` : "";
+              return (
+                <article
+                  key={field.id}
+                  className="rounded-md border border-line p-4 space-y-3"
                 >
-                  Save entry
-                </button>
-              </form>
-            )}
-          </section>
-        ) : null}
-
-        {/* History */}
-        <section className="space-y-3">
-          <h2 className="text-sm font-medium text-muted">Recent entries</h2>
-          {entries.length === 0 ? (
-            <p className="text-sm text-faint">No diary entries yet.</p>
-          ) : (
-            <ul className="divide-y divide-line rounded-md border border-line">
-              {entries.map((e) => (
-                <li key={e.id} className="px-4 py-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs text-faint">
-                        {relativeAge(e.entry_at)}
-                        {e.attached_dose_log_id ? (
-                          <span className="ml-2 text-muted">(with dose)</span>
-                        ) : null}
-                      </p>
-                      <div className="mt-1 flex flex-wrap gap-3 text-sm">
-                        {Object.entries(e.field_values).map(([fid, val]) => (
-                          <span key={fid} className="text-paper">
-                            <span className="text-faint">
-                              {fieldNameMap.get(fid) ?? fid}:
-                            </span>{" "}
-                            {String(val)}
-                          </span>
-                        ))}
-                      </div>
-                      {e.note ? (
-                        <p className="mt-1 text-xs text-muted">{e.note}</p>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <h2 className="text-sm font-medium text-paper">
+                      {field.name}
+                      {field.unit ? (
+                        <span className="ml-1 text-xs text-faint">
+                          ({field.unit})
+                        </span>
                       ) : null}
-                    </div>
-                    {canLog ? (
-                      <form action={deleteDiaryEntry} className="shrink-0">
-                        <input type="hidden" name="entry_id" value={e.id} />
-                        <input type="hidden" name="return_to" value="/diary" />
-                        <button
-                          type="submit"
-                          className="text-xs text-faint underline hover:text-muted"
-                        >
-                          remove
-                        </button>
-                      </form>
+                    </h2>
+                    {trend.kind === "numeric" ? (
+                      <p className="text-xs tabular text-muted">
+                        <span className="text-paper">{tidy(trend.latest)}{unit}</span>
+                        <span className="text-faint">
+                          {" "}
+                          · range {tidy(trend.min)}–{tidy(trend.max)} · avg{" "}
+                          {tidy(trend.avg)}
+                        </span>
+                      </p>
+                    ) : trend.kind === "boolean" ? (
+                      <p className="text-xs tabular text-muted">
+                        Yes on{" "}
+                        <span className="text-paper">
+                          {trend.yes} of {trend.total}
+                        </span>{" "}
+                        days
+                      </p>
+                    ) : trend.kind === "distribution" ? (
+                      <p className="text-xs tabular text-faint">
+                        {trend.total} days logged
+                      </p>
                     ) : null}
                   </div>
+
+                  {trend.kind === "numeric" ? (
+                    <NumericChart
+                      points={trend.points}
+                      yMin={field.field_type === "scale_1_10" ? 1 : undefined}
+                      yMax={field.field_type === "scale_1_10" ? 10 : undefined}
+                    />
+                  ) : trend.kind === "boolean" ? (
+                    <BooleanStrip points={trend.points} />
+                  ) : trend.kind === "distribution" ? (
+                    <DistributionBars counts={trend.counts} total={trend.total} />
+                  ) : trend.kind === "text" ? (
+                    <ul className="space-y-1.5">
+                      {trend.recent.map((r, i) => (
+                        <li key={i} className="text-sm text-paper">
+                          <span className="mr-2 text-xs text-faint tabular">
+                            {shortDate(r.date)}
+                          </span>
+                          {r.text}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-xs text-faint">Nothing logged yet.</p>
+                  )}
+                </article>
+              );
+            })}
+          </section>
+        )}
+
+        {/* Day notes journal */}
+        {recentNotes.length > 0 ? (
+          <section className="space-y-3">
+            <h2 className="text-sm font-medium text-muted">Recent notes</h2>
+            <ul className="divide-y divide-line rounded-md border border-line">
+              {recentNotes.map((n, i) => (
+                <li key={i} className="px-4 py-3">
+                  <p className="text-xs text-faint tabular">{shortDate(n.date)}</p>
+                  <p className="mt-0.5 text-sm text-paper">{n.note}</p>
                 </li>
               ))}
             </ul>
-          )}
-        </section>
+          </section>
+        ) : null}
       </main>
     </div>
   );

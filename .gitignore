@@ -6,6 +6,9 @@
 /out/
 next-env.d.ts
 
+# generated PWA service worker (serwist builds app/sw.ts -> public/sw.js)
+/public/sw.js
+
 # production
 /build
 

@@ -436,6 +436,66 @@ export function generateScheduledDoses(
   return doses;
 }
 
+/**
+ * Convenience builder for the inline charts (PRD §5.7): the modelled curve from
+ * logged doses, plus an optional overlay of the chosen/prescribed schedule (the
+ * "where you'd sit" reference). Pure — reused by the detail page and dashboard.
+ * Illustrative relative levels only; never an absolute concentration.
+ */
+export function buildMedicationPkSeries(opts: {
+  params: PkParams;
+  doseEvents: DoseEvent[];
+  now: number;
+  pastDays: number;
+  futureDays: number;
+  scheduleFrequency?: {
+    type: string;
+    interval?: number;
+    unit?: string;
+    count?: number;
+    period?: string;
+  };
+  scheduleDose?: number;
+  /** Coarser step (e.g. 4h) keeps inline sparklines cheap. Defaults to 1h. */
+  stepMs?: number;
+}): { series: PkTimeSeries; overlay?: PkTimeSeries } {
+  const dayMs = MS_PER_HOUR * 24;
+  const rangeStart = opts.now - opts.pastDays * dayMs;
+  const rangeEnd = opts.now + opts.futureDays * dayMs;
+  const step = opts.stepMs ?? DEFAULT_STEP_MS;
+
+  const series = computeConcentration(
+    opts.doseEvents,
+    opts.params,
+    rangeStart,
+    rangeEnd,
+    opts.now,
+    step
+  );
+
+  let overlay: PkTimeSeries | undefined;
+  if (opts.scheduleFrequency && opts.scheduleDose && opts.scheduleDose > 0) {
+    const scheduled = generateScheduledDoses(
+      opts.scheduleFrequency,
+      opts.scheduleDose,
+      rangeStart,
+      rangeEnd
+    );
+    if (scheduled.length > 0) {
+      overlay = computeConcentration(
+        scheduled,
+        opts.params,
+        rangeStart,
+        rangeEnd,
+        opts.now,
+        step
+      );
+    }
+  }
+
+  return { series, overlay };
+}
+
 // ── Personal calibration (§4.8, §5.7) ──────────────────────────────────────
 
 /**

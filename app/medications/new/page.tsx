@@ -41,7 +41,7 @@ export default async function NewMedicationPage({
         ) : (
           <>
             {params.error ? (
-              <p className="mt-6 rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">
+              <p className="mt-6 rounded-md border alert-error p-3 text-sm">
                 {params.error}
               </p>
             ) : null}

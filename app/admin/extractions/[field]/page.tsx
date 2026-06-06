@@ -91,7 +91,7 @@ export default async function ExtractionDrillInPage({
       </div>
 
       {error ? (
-        <p className="rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">
+        <p className="rounded-md border alert-error p-3 text-sm">
           {error}
         </p>
       ) : null}

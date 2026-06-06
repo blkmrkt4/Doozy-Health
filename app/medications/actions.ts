@@ -38,10 +38,33 @@ import {
 } from "@/lib/extraction";
 import { generateReminders } from "@/lib/reminders";
 import { explainInteraction } from "@/lib/interactions";
+import { nextMedColour } from "@/lib/colours";
 import { logWarn } from "@/lib/log";
 
 function failNew(message: string): never {
   redirect(`/medications/new?error=${encodeURIComponent(message)}`);
+}
+
+/**
+ * Assign a distinct identity colour to a newly-created medication (PRD §9),
+ * picking the next palette colour not already used by the patient's active
+ * medications. Cosmetic — a failure here never blocks medication creation.
+ */
+async function assignMedColour(
+  supabase: SupabaseClient,
+  patientId: string,
+  medId: string
+): Promise<void> {
+  const { data: existing } = await supabase
+    .from("medications")
+    .select("colour")
+    .eq("patient_id", patientId)
+    .eq("archived", false)
+    .neq("id", medId);
+  const colour = nextMedColour(
+    (existing ?? []).map((r) => r.colour as string | null)
+  );
+  await supabase.from("medications").update({ colour }).eq("id", medId);
 }
 
 function str(formData: FormData, key: string): string {
@@ -85,18 +108,19 @@ type RegimenInput = {
 function parseRegimen(
   formData: FormData,
   prefix: string,
-  label: string
+  label: string,
+  fail: (msg: string) => never = failNew
 ): RegimenInput {
   const dose_amount = Number(str(formData, `${prefix}_dose_amount`));
   if (!Number.isFinite(dose_amount) || dose_amount <= 0) {
-    failNew(`Enter a ${label} dose amount greater than zero.`);
+    fail(`Enter a ${label} dose amount greater than zero.`);
   }
   const dose_unit = inSet(str(formData, `${prefix}_dose_unit`), DOSE_UNITS);
-  if (!dose_unit) failNew(`Choose a valid ${label} dose unit.`);
+  if (!dose_unit) fail(`Choose a valid ${label} dose unit.`);
   const route = inSet(str(formData, `${prefix}_route`), ROUTES);
-  if (!route) failNew(`Choose a valid ${label} route.`);
+  if (!route) fail(`Choose a valid ${label} route.`);
   const frequency = parseFrequency(formData, `${prefix}_freq`);
-  if (!frequency) failNew(`Complete the ${label} frequency.`);
+  if (!frequency) fail(`Complete the ${label} frequency.`);
   return { dose_amount, dose_unit, route, frequency };
 }
 
@@ -207,8 +231,158 @@ export async function createMedication(formData: FormData) {
     failNew(`Could not save the medication: ${error.message}`);
   }
 
+  await assignMedColour(supabase, active.id, medId as string);
+
   revalidatePath("/dashboard");
   redirect(`/medications/${medId as string}?new=1`);
+}
+
+/**
+ * Edit a medication — the same shape as creation (PRD §5.2.1, §5.3). The
+ * prescribed regimen is immutable, so a change records a NEW prescription row
+ * (history is kept and shown in the doctor PDF); the delivery form is likewise
+ * versioned (a new fill); the chosen regimen is updated in place. Owner-only,
+ * matching the regimen RLS policies and PRD §5.6. The dashboard wheel and PK
+ * chart recompute from the updated values on next render.
+ */
+export async function updateMedication(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const medId = str(formData, "medication_id");
+  if (!medId) redirect("/dashboard");
+  const failEdit = (msg: string): never =>
+    redirect(`/medications/${medId}/edit?error=${encodeURIComponent(msg)}`);
+
+  const { data: med } = await supabase
+    .from("medications")
+    .select("id, patient_id")
+    .eq("id", medId)
+    .maybeSingle();
+  if (!med) {
+    redirect(
+      `/medications/${medId}?error=${encodeURIComponent("Medication not found.")}`
+    );
+  }
+  const patientId = med.patient_id as string;
+
+  const role = await roleForPatient(supabase, patientId);
+  if (role !== "owner") {
+    failEdit("Only the patient owner can edit a medication.");
+  }
+
+  const displayName = str(formData, "drug_name");
+  if (!displayName) failEdit("Enter the medication name.");
+  const isPrivate = formData.get("is_private") === "on";
+  const canonicalDrugId = str(formData, "canonical_drug_id") || null;
+
+  const prescribed = parseRegimen(formData, "prescribed", "prescribed", failEdit);
+
+  const formType = inSet(str(formData, "form_type"), FORM_TYPES);
+  if (!formType) {
+    redirect(
+      `/medications/${medId}/edit?error=${encodeURIComponent("Choose the delivery form.")}`
+    );
+  }
+
+  // Optional concentration (e.g. 200 mg/mL for a vial).
+  let concentration: Concentration | null = null;
+  const concAmount = Number(str(formData, "conc_amount"));
+  if (str(formData, "conc_amount") !== "" && Number.isFinite(concAmount)) {
+    const concUnit = inSet(str(formData, "conc_unit"), DOSE_UNITS);
+    const perVolume = Number(str(formData, "conc_per_volume") || "1");
+    if (!concUnit || !Number.isFinite(perVolume) || perVolume <= 0) {
+      redirect(
+        `/medications/${medId}/edit?error=${encodeURIComponent("Complete the concentration, or clear it.")}`
+      );
+    }
+    concentration = {
+      amount: concAmount,
+      unit: concUnit,
+      per_volume: perVolume,
+      volume_unit: "mL",
+    };
+  }
+
+  // Optional syringe spec (injectables only).
+  let syringeSpec: SyringeSpec | null = null;
+  const capacity = Number(str(formData, "syringe_capacity_ml"));
+  if (str(formData, "syringe_capacity_ml") !== "" && Number.isFinite(capacity)) {
+    syringeSpec = {
+      capacity_mL: capacity,
+      needle_gauge: Number(str(formData, "syringe_needle_gauge")) || 0,
+      needle_length_in: Number(str(formData, "syringe_needle_length_in")) || 0,
+      unit_markings: str(formData, "syringe_unit_markings"),
+    };
+  }
+
+  const choseDiffers = formData.get("chosen_differs") === "on";
+  const chosen = choseDiffers
+    ? parseRegimen(formData, "chosen", "chosen", failEdit)
+    : prescribed;
+  const reasonNote = choseDiffers ? str(formData, "chosen_reason_note") : "";
+
+  // 1) Medication identity fields (+ chosen syringe from inventory, PRD §5.1).
+  const { error: medErr } = await supabase
+    .from("medications")
+    .update({
+      display_name: displayName,
+      is_private: isPrivate,
+      canonical_drug_id: canonicalDrugId,
+      syringe_id: str(formData, "syringe_id") || null,
+    })
+    .eq("id", medId);
+  if (medErr) failEdit(`Could not save changes: ${medErr.message}`);
+
+  // 2) Prescribed regimen is immutable — record a NEW version (PRD §5.3).
+  const { error: presErr } = await supabase.from("prescribed_regimens").insert({
+    medication_id: medId,
+    patient_id: patientId,
+    dose_amount: prescribed.dose_amount,
+    dose_unit: prescribed.dose_unit,
+    frequency: prescribed.frequency,
+    route: prescribed.route,
+    duration_days: Number(str(formData, "prescribed_duration_days")) || null,
+    prescriber_name: str(formData, "prescriber_name") || null,
+    directions: str(formData, "directions") || null,
+  });
+  if (presErr) failEdit(`Could not save the prescription: ${presErr.message}`);
+
+  // 3) Delivery form — record a NEW version (a new fill).
+  const { error: delErr } = await supabase.from("delivery_forms").insert({
+    medication_id: medId,
+    patient_id: patientId,
+    form_type: formType,
+    concentration,
+    package_count: Number(str(formData, "package_count")) || null,
+    package_unit: str(formData, "package_unit") || null,
+    syringe_spec: syringeSpec,
+    expiry_date: str(formData, "expiry_date") || null,
+    batch: str(formData, "batch") || null,
+    manufacturer: str(formData, "manufacturer") || null,
+  });
+  if (delErr) failEdit(`Could not save the delivery form: ${delErr.message}`);
+
+  // 4) Chosen regimen — editable in place (PRD §5.3).
+  const { error: chosenErr } = await supabase
+    .from("chosen_regimens")
+    .update({
+      dose_amount: chosen.dose_amount,
+      dose_unit: chosen.dose_unit,
+      frequency: chosen.frequency,
+      route: chosen.route,
+      reason_note: reasonNote || null,
+    })
+    .eq("medication_id", medId)
+    .eq("active", true);
+  if (chosenErr) failEdit(`Could not save how you take it: ${chosenErr.message}`);
+
+  revalidatePath("/dashboard");
+  revalidatePath(`/medications/${medId}`);
+  redirect(`/medications/${medId}`);
 }
 
 // ── Owner controls on the detail page ───────────────────────────────────────
@@ -242,6 +416,54 @@ export async function archiveMedication(formData: FormData) {
 
   if (error) {
     redirect(`/medications/${id}?error=${encodeURIComponent(error.message)}`);
+  }
+  revalidatePath("/dashboard");
+  redirect("/dashboard");
+}
+
+/** Bring an archived medication back into the active list (owner-only via RLS). */
+export async function unarchiveMedication(formData: FormData) {
+  const supabase = await createClient();
+  const id = str(formData, "medication_id");
+
+  const { error } = await supabase
+    .from("medications")
+    .update({ archived: false })
+    .eq("id", id);
+
+  if (error) {
+    redirect(`/dashboard?error=${encodeURIComponent(error.message)}`);
+  }
+  revalidatePath("/dashboard");
+  redirect(`/medications/${id}`);
+}
+
+/**
+ * Permanently delete a medication and everything owned by it (PRD §5.6). Unlike
+ * archiving, this removes it from charts and the clinician report. Child rows
+ * cascade via FKs; documents unlink. Owner-only — enforced by the
+ * medications_owner_delete RLS policy, so a blocked attempt deletes 0 rows
+ * rather than erroring.
+ */
+export async function deleteMedication(formData: FormData) {
+  const supabase = await createClient();
+  const id = str(formData, "medication_id");
+  if (!id) redirect("/dashboard");
+
+  const { error, count } = await supabase
+    .from("medications")
+    .delete({ count: "exact" })
+    .eq("id", id);
+
+  if (error) {
+    redirect(`/medications/${id}?error=${encodeURIComponent(error.message)}`);
+  }
+  if (!count) {
+    redirect(
+      `/medications/${id}?error=${encodeURIComponent(
+        "Only the patient owner can delete a medication."
+      )}`
+    );
   }
   revalidatePath("/dashboard");
   redirect("/dashboard");
@@ -395,7 +617,7 @@ export async function logDose(formData: FormData) {
 
   revalidatePath("/dashboard");
   revalidatePath(`/medications/${medicationId}`);
-  redirect(`/medications/${medicationId}`);
+  redirect(str(formData, "return_to") || `/medications/${medicationId}`);
 }
 
 // ── Photos / documents (PRD §5.1, §13.5) ────────────────────────────────────
@@ -506,13 +728,84 @@ export async function deleteDoseLog(formData: FormData) {
   const supabase = await createClient();
   const medicationId = str(formData, "medication_id");
   const logId = str(formData, "log_id");
+  const returnTo = str(formData, "return_to") || `/medications/${medicationId}`;
 
   const { error } = await supabase.from("dose_logs").delete().eq("id", logId);
   if (error) failDose(medicationId, `Could not remove the log: ${error.message}`);
 
   revalidatePath("/dashboard");
   revalidatePath(`/medications/${medicationId}`);
-  redirect(`/medications/${medicationId}`);
+  redirect(returnTo);
+}
+
+/**
+ * Log a single "taken" dose without redirecting — for the tap-through check-dot
+ * agenda (optimistic UI). Owner+caregiver. Best-effort: on any problem it just
+ * revalidates, so the optimistic state reconciles to the real count.
+ */
+export async function quickLogDose(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return;
+
+  const medicationId = str(formData, "medication_id");
+  const { data: med } = await supabase
+    .from("medications")
+    .select("patient_id")
+    .eq("id", medicationId)
+    .maybeSingle();
+  if (!med) return;
+  const role = await roleForPatient(supabase, med.patient_id);
+  if (role !== "owner" && role !== "caregiver") return;
+
+  const amountRaw = str(formData, "amount");
+  const amount = Number(amountRaw);
+  const unit = inSet(str(formData, "unit"), DOSE_UNITS);
+  if (!amountRaw || !Number.isFinite(amount) || amount <= 0 || !unit) return;
+  const routeRaw = str(formData, "route_taken");
+  const route = routeRaw ? inSet(routeRaw, ROUTES) : null;
+
+  const whenRaw = str(formData, "logged_at");
+  let loggedAt: string | undefined;
+  if (whenRaw) {
+    const d = new Date(whenRaw);
+    if (!Number.isNaN(d.getTime())) loggedAt = d.toISOString();
+  }
+
+  const row: Record<string, unknown> = {
+    medication_id: medicationId,
+    patient_id: med.patient_id,
+    event_type: "taken",
+    amount: amountRaw,
+    unit,
+    route_taken: route,
+    note: str(formData, "note") || null,
+    source: role === "caregiver" ? "caregiver" : "manual",
+    logged_by_user_id: user.id,
+  };
+  if (loggedAt) row.logged_at = loggedAt;
+
+  await supabase.from("dose_logs").insert(row);
+  revalidatePath("/dashboard");
+  revalidatePath(`/medications/${medicationId}`);
+}
+
+/** Remove a single dose log without redirecting (tap-through agenda undo). */
+export async function quickUnlogDose(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return;
+  const medicationId = str(formData, "medication_id");
+  const logId = str(formData, "log_id");
+  if (!logId) return;
+
+  await supabase.from("dose_logs").delete().eq("id", logId);
+  revalidatePath("/dashboard");
+  revalidatePath(`/medications/${medicationId}`);
 }
 
 // ── AI extraction (PRD §5.2, §13.8–9) ──────────────────────────────────────
@@ -791,6 +1084,8 @@ export async function confirmPhotoExtraction(formData: FormData) {
 
   if (medErr) failReview(docId, `Could not save the medication: ${medErr.message}`);
 
+  await assignMedColour(supabase, active.id, medId as string);
+
   // Link the document to the medication.
   await admin
     .from("documents")
@@ -921,6 +1216,8 @@ export async function confirmPrescriptionExtraction(formData: FormData) {
   );
 
   if (medErr) failReview(docId, `Could not save the medication: ${medErr.message}`);
+
+  await assignMedColour(supabase, active.id, medId as string);
 
   // Link the document.
   await admin

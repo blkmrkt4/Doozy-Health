@@ -20,7 +20,7 @@ export default async function HomePage() {
         </p>
         <Link
           href="/login"
-          className="mt-8 inline-block rounded-md bg-accent px-5 py-2.5 text-sm font-medium text-ink transition-opacity hover:opacity-90"
+          className="mt-8 inline-block rounded-md bg-accent px-5 py-2.5 text-sm font-medium text-on-accent transition-opacity hover:opacity-90"
         >
           Sign in
         </Link>

@@ -144,6 +144,40 @@ describe.skipIf(!STACK_READY)("medication RLS + is_private override", () => {
     expect(error).not.toBeNull(); // RLS WITH CHECK rejects non-owners
   });
 
+  it("caregiver cannot delete a medication, but the owner can", async () => {
+    const owner = await signedInClient(ownerEmail);
+    const victimId = await createMed(owner, patientId, "Deletable", false);
+
+    // A caregiver's delete is silently filtered by RLS — no error, 0 rows.
+    const cg = await signedInClient(caregiverEmail);
+    const { error: cgErr, count: cgCount } = await cg
+      .from("medications")
+      .delete({ count: "exact" })
+      .eq("id", victimId);
+    expect(cgErr).toBeNull();
+    expect(cgCount).toBe(0);
+
+    const { data: still } = await owner
+      .from("medications")
+      .select("id")
+      .eq("id", victimId);
+    expect((still ?? []).length).toBe(1);
+
+    // The owner can hard-delete it; child rows cascade via FKs.
+    const { error: oErr, count: oCount } = await owner
+      .from("medications")
+      .delete({ count: "exact" })
+      .eq("id", victimId);
+    expect(oErr).toBeNull();
+    expect(oCount).toBe(1);
+
+    const { data: gone } = await owner
+      .from("medications")
+      .select("id")
+      .eq("id", victimId);
+    expect(gone).toEqual([]);
+  });
+
   it("enforces one active chosen regimen per medication", async () => {
     const owner = await signedInClient(ownerEmail);
     const { error } = await owner.from("chosen_regimens").insert({

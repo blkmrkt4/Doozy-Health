@@ -108,7 +108,7 @@ export function ScanForm() {
           </label>
 
           {error ? (
-            <p className="rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">
+            <p className="rounded-md border alert-error p-3 text-sm">
               {error}
             </p>
           ) : null}
@@ -127,12 +127,12 @@ function ExtractingIndicator() {
           <path
             d="M 18 10 L 18 30 L 8 65 Q 6 72 12 75 L 52 75 Q 58 72 56 65 L 46 30 L 46 10"
             fill="none"
-            stroke="#555555"
+            stroke="var(--color-faint)"
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
-          <line x1="14" y1="10" x2="50" y2="10" stroke="#555555" strokeWidth="2" strokeLinecap="round" />
+          <line x1="14" y1="10" x2="50" y2="10" stroke="var(--color-faint)" strokeWidth="2" strokeLinecap="round" />
           <clipPath id="beaker-clip">
             <path d="M 18 30 L 8 65 Q 6 72 12 75 L 52 75 Q 58 72 56 65 L 46 30 Z" />
           </clipPath>

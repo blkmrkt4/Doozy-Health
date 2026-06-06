@@ -132,7 +132,7 @@ export function ReportForm({
               type="button"
               onClick={handleGenerate}
               disabled={generating}
-              className="rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-ink transition-opacity hover:opacity-90 disabled:opacity-50"
+              className="rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50"
             >
               {generating ? "Generating..." : "Download PDF"}
             </button>

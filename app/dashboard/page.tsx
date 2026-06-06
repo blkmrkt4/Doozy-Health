@@ -3,11 +3,35 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getActivePatient } from "@/lib/active-patient";
 import { signOut } from "@/app/login/actions";
-import { logScheduledDose } from "@/app/medications/actions";
+import { archiveSyringe } from "@/app/inventory/actions";
+import { unarchiveMedication } from "@/app/medications/actions";
+import { MedDoseRow } from "@/app/_components/med-dose-row";
+import { dayKey } from "@/lib/schedule";
 import { acceptInvite, declineInvite } from "@/app/settings/caregivers/actions";
 import { formatRegimenSummary, relativeAge } from "@/lib/format";
 import { PatientSwitcher } from "@/app/_components/patient-switcher";
 import { PrivacyToggle } from "@/app/_components/privacy-toggle";
+import { CalendarSection } from "@/app/_components/calendar-section";
+import { PkChart } from "@/app/medications/[id]/timeline/pk-chart";
+import {
+  buildWheelModel,
+  type MedRegimen,
+  type TakenLog,
+  type DayLog,
+  type MedLogMeta,
+} from "@/lib/adherence";
+import {
+  resolveParams,
+  buildMedicationPkSeries,
+  type DoseEvent,
+} from "@/lib/pharmacokinetics";
+import {
+  isFrequency,
+  INJECTABLE_FORM_TYPES,
+  type FormType,
+  type TrackedField,
+  type DiaryEntry,
+} from "@/lib/types";
 
 type ChosenRow = {
   dose_amount: string;
@@ -15,6 +39,14 @@ type ChosenRow = {
   frequency: unknown;
   route: string;
   active: boolean;
+  created_at: string;
+};
+
+type DeliveryRow = {
+  form_type: string;
+  concentration: { amount: number; per_volume: number } | null;
+  syringe_spec: { capacity_mL?: number } | null;
+  created_at: string;
 };
 
 type MedicationRow = {
@@ -23,10 +55,22 @@ type MedicationRow = {
   canonical_drug_id: string | null;
   is_private: boolean;
   entry_source: string;
+  created_at: string;
+  colour: string | null;
   chosen_regimens: ChosenRow[] | null;
+  delivery_forms: DeliveryRow[] | null;
+  syringe:
+    | { spec: { capacity_mL?: number } | null }
+    | { spec: { capacity_mL?: number } | null }[]
+    | null;
 };
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ day?: string }>;
+}) {
+  const { day: selectedDayParam } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -100,7 +144,7 @@ export default async function DashboardPage() {
   const { data } = await supabase
     .from("medications")
     .select(
-      "id, display_name, canonical_drug_id, is_private, entry_source, chosen_regimens(dose_amount, dose_unit, frequency, route, active)"
+      "id, display_name, canonical_drug_id, is_private, entry_source, created_at, colour, chosen_regimens(dose_amount, dose_unit, frequency, route, active, created_at), delivery_forms(form_type, concentration, syringe_spec, created_at), syringe:inventory_items!medications_syringe_id_fkey(spec)"
     )
     .eq("archived", false)
     .eq("chosen_regimens.active", true)
@@ -108,6 +152,21 @@ export default async function DashboardPage() {
 
   const medications = (data ?? []) as MedicationRow[];
   const isOwner = activePatient?.role === "owner";
+
+  // Archived medications — hidden from the active list but available to add back
+  // (PRD §5.6). Owner-only; archiving is owner-managed.
+  const { data: archivedData } = isOwner
+    ? await supabase
+        .from("medications")
+        .select("id, display_name, colour")
+        .eq("archived", true)
+        .order("display_name")
+    : { data: null };
+  const archivedMeds = (archivedData ?? []) as Array<{
+    id: string;
+    display_name: string;
+    colour: string | null;
+  }>;
   // Owners and caregivers can log doses (PRD §5.6); viewers cannot.
   const canLog =
     activePatient?.role === "owner" || activePatient?.role === "caregiver";
@@ -149,7 +208,7 @@ export default async function DashboardPage() {
   // RLS scopes these to medications the caller may read.
   const { data: logRows } = await supabase
     .from("dose_logs")
-    .select("medication_id, logged_at")
+    .select("id, medication_id, logged_at, event_type, amount, unit")
     .order("logged_at", { ascending: false });
   const lastLogged = new Map<string, string>();
   for (const r of logRows ?? []) {
@@ -157,6 +216,203 @@ export default async function DashboardPage() {
       lastLogged.set(r.medication_id, r.logged_at);
     }
   }
+
+  // ── Medication calendar (the date-wheel + adherence heatmap, PRD §5.4) ─────
+  // Regimens, logs, names and colours assembled for the overall wheel and a
+  // per-drug wheel on each card. The adherence grade is a factual record of
+  // logged-versus-scheduled doses (deterministic — no LLM, hard rule #8).
+  const nowMs = Date.now();
+  const regimens: MedRegimen[] = [];
+  const medNames: Record<string, string> = {};
+  const medMeta: Record<string, MedLogMeta> = {};
+  for (const m of medications) {
+    medNames[m.id] = m.display_name;
+    const chosen = (m.chosen_regimens ?? []).find((c) => c.active);
+    if (!chosen || !isFrequency(chosen.frequency)) continue;
+    const anchorMs = new Date(chosen.created_at ?? m.created_at).getTime();
+    if (!Number.isFinite(anchorMs)) continue;
+    regimens.push({
+      medicationId: m.id,
+      frequency: chosen.frequency,
+      anchorMs,
+      doseAmount: Number(chosen.dose_amount),
+      doseUnit: chosen.dose_unit,
+      colour: m.colour ?? "#777777",
+    });
+
+    const delivery = [...(m.delivery_forms ?? [])].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    )[0];
+    medMeta[m.id] = {
+      medId: m.id,
+      name: m.display_name,
+      colour: m.colour ?? "#777777",
+      defaultAmount: Number(chosen.dose_amount),
+      defaultUnit: chosen.dose_unit,
+      defaultRoute: chosen.route,
+      isInjectable: delivery
+        ? INJECTABLE_FORM_TYPES.has(delivery.form_type as FormType)
+        : false,
+      concentrationAmount: delivery?.concentration?.amount ?? null,
+      concentrationPerVolume: delivery?.concentration?.per_volume ?? null,
+      syringeCapacityMl:
+        (Array.isArray(m.syringe) ? m.syringe[0]?.spec : m.syringe?.spec)
+          ?.capacity_mL ??
+        delivery?.syringe_spec?.capacity_mL ??
+        null,
+    };
+  }
+  const takenLogs: TakenLog[] = (logRows ?? [])
+    .filter((r) => r.event_type === "taken")
+    .map((r) => ({
+      medicationId: r.medication_id,
+      loggedAtMs: new Date(r.logged_at).getTime(),
+      amount: r.amount != null ? Number(r.amount) : null,
+      unit: (r.unit as string | null) ?? null,
+    }));
+  const wheelModel = buildWheelModel({ nowMs, rangeDays: 50, regimens, takenLogs });
+
+  // All logs (incl. skips/PRN) for the calendar agenda's per-day list + delete.
+  const calendarDayLogs: DayLog[] = (logRows ?? []).map((r) => ({
+    id: r.id as string,
+    medId: r.medication_id,
+    loggedAtMs: new Date(r.logged_at).getTime(),
+    eventType: r.event_type as DayLog["eventType"],
+    amount: r.amount != null ? Number(r.amount) : null,
+    unit: (r.unit as string | null) ?? null,
+  }));
+
+  // A per-drug wheel model for the calendar bar on each medication card.
+  const wheelByMed = new Map<string, ReturnType<typeof buildWheelModel>>();
+  for (const reg of regimens) {
+    wheelByMed.set(
+      reg.medicationId,
+      buildWheelModel({
+        nowMs,
+        rangeDays: 50,
+        regimens: [reg],
+        takenLogs: takenLogs.filter((t) => t.medicationId === reg.medicationId),
+      })
+    );
+  }
+
+  // Inline PK sparkline per card (PRD §5.7): illustrative modelled level from
+  // logged doses + the chosen schedule reference. Deterministic (no LLM); only
+  // linear drugs with PK reference data. Coarse step keeps N cards cheap.
+  const pkByMed = new Map<string, ReturnType<typeof buildMedicationPkSeries>>();
+  const pkDrugIds = Array.from(
+    new Set(
+      medications
+        .map((m) => m.canonical_drug_id)
+        .filter((id): id is string => Boolean(id))
+    )
+  );
+  if (pkDrugIds.length > 0) {
+    const { data: pkDrugs } = await supabase
+      .from("drugs")
+      .select(
+        "id, half_life_hours, half_life_range_hours, bioavailability, tmax_hours, " +
+          "kernel_by_route, release_duration_hours, is_linear, nonlinear_reason, metabolites"
+      )
+      .in("id", pkDrugIds);
+    const drugById = new Map(
+      ((pkDrugs ?? []) as unknown as Array<Record<string, unknown>>).map((d) => [
+        String(d.id),
+        d,
+      ])
+    );
+
+    const pkPastMs = nowMs - 30 * 24 * 3_600_000;
+    const doseEventsByMed = new Map<string, DoseEvent[]>();
+    for (const r of logRows ?? []) {
+      if (!(r.event_type === "taken" || r.event_type === "prn") || !r.amount) continue;
+      const ts = new Date(r.logged_at).getTime();
+      if (ts < pkPastMs) continue;
+      const arr = doseEventsByMed.get(r.medication_id) ?? [];
+      arr.push({ timestamp: ts, amount: Number(r.amount) });
+      doseEventsByMed.set(r.medication_id, arr);
+    }
+
+    for (const m of medications) {
+      if (!m.canonical_drug_id) continue;
+      const chosen = (m.chosen_regimens ?? []).find((c) => c.active);
+      if (!chosen || !isFrequency(chosen.frequency)) continue;
+      const drug = drugById.get(m.canonical_drug_id);
+      if (!drug) continue;
+      const params = resolveParams(
+        drug as unknown as Parameters<typeof resolveParams>[0],
+        chosen.route
+      );
+      if (!params || !params.isLinear) continue;
+      pkByMed.set(
+        m.id,
+        buildMedicationPkSeries({
+          params,
+          doseEvents: doseEventsByMed.get(m.id) ?? [],
+          now: nowMs,
+          pastDays: 30,
+          futureDays: 14,
+          scheduleFrequency: chosen.frequency,
+          scheduleDose: Number(chosen.dose_amount),
+          stepMs: 6 * 3_600_000,
+        })
+      );
+    }
+  }
+
+  // Diary (PRD §5.9): active tracked fields (+ med scope links) and the daily
+  // diary entries, for the calendar's per-day Diary twisty.
+  let diaryFields: TrackedField[] = [];
+  const diaryEntriesByDay = new Map<string, DiaryEntry>();
+  if (activePatient) {
+    const { data: tfRows } = await supabase
+      .from("tracked_fields")
+      .select("id, name, field_type, unit, category_options, display_order")
+      .eq("patient_id", activePatient.id)
+      .eq("active", true)
+      .order("display_order");
+    const { data: tfmRows } = await supabase
+      .from("tracked_field_medications")
+      .select("tracked_field_id, medication_id")
+      .eq("patient_id", activePatient.id);
+    const tfMeds = new Map<string, string[]>();
+    for (const r of (tfmRows ?? []) as { tracked_field_id: string; medication_id: string }[]) {
+      const a = tfMeds.get(r.tracked_field_id) ?? [];
+      a.push(r.medication_id);
+      tfMeds.set(r.tracked_field_id, a);
+    }
+    diaryFields = ((tfRows ?? []) as TrackedField[]).map((f) => ({
+      ...f,
+      medicationIds: tfMeds.get(f.id) ?? [],
+    }));
+
+    const { data: deRows } = await supabase
+      .from("diary_entries")
+      .select("id, entry_at, entry_date, field_values, note")
+      .eq("patient_id", activePatient.id)
+      .not("entry_date", "is", null);
+    for (const e of (deRows ?? []) as DiaryEntry[]) {
+      if (e.entry_date) diaryEntriesByDay.set(e.entry_date, e);
+    }
+  }
+
+  // Syringe inventory (PRD §5.1) — supplies on hand, shown as inventory rows.
+  const { data: inventoryRows } = await supabase
+    .from("inventory_items")
+    .select("id, label, category, spec")
+    .eq("archived", false)
+    .order("created_at", { ascending: false });
+  const syringes = (inventoryRows ?? []) as Array<{
+    id: string;
+    label: string;
+    category: string;
+    spec: {
+      capacity_mL?: number;
+      needle_gauge?: number;
+      needle_length_in?: number;
+      unit_markings?: string;
+    } | null;
+  }>;
 
   return (
     <div className="min-h-full">
@@ -227,7 +483,7 @@ export default async function DashboardPage() {
                         <input type="hidden" name="membership_id" value={mId} />
                         <button
                           type="submit"
-                          className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-ink hover:opacity-90"
+                          className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-on-accent hover:opacity-90"
                         >
                           Accept
                         </button>
@@ -249,15 +505,38 @@ export default async function DashboardPage() {
           </section>
         ) : null}
 
+        {/* Overall medication calendar (PRD §5.4, §9): draggable date-wheel with
+            the adherence heatmap and per-medication colour dots. */}
+        {medications.length > 0 ? (
+          <CalendarSection
+            model={wheelModel}
+            medNames={medNames}
+            dayLogs={calendarDayLogs}
+            medMeta={medMeta}
+            canLog={canLog}
+            initialDayKey={selectedDayParam}
+            diaryFields={diaryFields}
+            diaryEntriesByDay={diaryEntriesByDay}
+          />
+        ) : null}
+
         <section className="flex items-center justify-between">
           <h1 className="text-sm font-medium text-muted">Medications</h1>
           {isOwner ? (
-            <Link
-              href="/medications/new"
-              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-ink transition-opacity hover:opacity-90"
-            >
-              + Add medication
-            </Link>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/inventory/new"
+                className="rounded-md border border-line px-3 py-2 text-sm text-muted transition-colors hover:bg-surface"
+              >
+                + Add syringe
+              </Link>
+              <Link
+                href="/medications/new"
+                className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent transition-opacity hover:opacity-90"
+              >
+                + Add medication
+              </Link>
+            </div>
           ) : null}
         </section>
 
@@ -275,11 +554,24 @@ export default async function DashboardPage() {
             {medications.map((m) => {
               const chosen = (m.chosen_regimens ?? []).find((c) => c.active);
               const last = lastLogged.get(m.id);
+              const medWheel = wheelByMed.get(m.id) ?? null;
+              const medPk = pkByMed.get(m.id) ?? null;
+              const todayD = medWheel ? medWheel.days[medWheel.todayIndex] : null;
+              const todayMark = todayD?.meds.find((x) => x.medId === m.id);
+              const todayTakenIds = todayD
+                ? calendarDayLogs
+                    .filter(
+                      (l) =>
+                        l.medId === m.id &&
+                        l.eventType === "taken" &&
+                        dayKey(l.loggedAtMs) === todayD.key
+                    )
+                    .sort((a, b) => a.loggedAtMs - b.loggedAtMs)
+                    .map((l) => l.id)
+                : [];
               return (
-                <li
-                  key={m.id}
-                  className="flex items-center justify-between gap-4 px-4 py-4"
-                >
+                <li key={m.id} className="px-4 py-4">
+                  <div className="flex items-center justify-between gap-4">
                   <Link
                     href={`/medications/${m.id}`}
                     className="min-w-0 flex-1 transition-colors hover:opacity-80"
@@ -318,22 +610,128 @@ export default async function DashboardPage() {
                     </p>
                   </Link>
                   {canLog && chosen ? (
-                    <form action={logScheduledDose} className="shrink-0">
-                      <input type="hidden" name="medication_id" value={m.id} />
-                      <input type="hidden" name="return_to" value="/dashboard" />
-                      <button
-                        type="submit"
-                        className="rounded-md bg-accent px-5 py-2.5 text-sm font-medium text-ink transition-opacity hover:opacity-90"
-                      >
-                        Taken
-                      </button>
-                    </form>
+                    <MedDoseRow
+                      meta={medMeta[m.id]}
+                      medColour={m.colour ?? "#777777"}
+                      medName={m.display_name}
+                      scheduled={todayMark?.scheduled ?? 0}
+                      logged={todayMark?.logged ?? 0}
+                      logIds={todayTakenIds}
+                      dayMs={todayD?.ms ?? nowMs}
+                      isToday={true}
+                      canLog={canLog}
+                      minDots={1}
+                      dotsOnly
+                    />
+                  ) : null}
+                  </div>
+                  {medWheel ? (
+                    <div className="mt-4">
+                      <CalendarSection
+                        model={medWheel}
+                        medNames={medNames}
+                        variant="bar"
+                      />
+                    </div>
+                  ) : null}
+                  {medPk ? (
+                    <div className="mt-4">
+                      <p className="mb-1 text-xs text-faint">
+                        Modelled level — illustrative, past 30 / next 14 days
+                      </p>
+                      <PkChart
+                        series={medPk.series}
+                        overlay={medPk.overlay}
+                        height={170}
+                      />
+                    </div>
                   ) : null}
                 </li>
               );
             })}
           </ul>
         )}
+
+        {/* Inventory — supplies on hand (syringes). A disclosure twisty per item
+            (PRD §5.1). Owners can remove. */}
+        {syringes.length > 0 ? (
+          <section className="mt-8">
+            <h2 className="mb-2 text-sm font-medium text-muted">Inventory</h2>
+            <ul className="divide-y divide-line overflow-hidden rounded-md border border-line">
+              {syringes.map((s) => (
+                <li key={s.id} className="px-4 py-3">
+                  <details>
+                    <summary className="flex cursor-pointer list-none items-center gap-3 text-sm">
+                      <span className="rounded-full border border-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-faint">
+                        syringe
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-paper blur-private">
+                        {s.label}
+                      </span>
+                      <span className="text-xs text-faint">on hand</span>
+                    </summary>
+                    <div className="mt-2 space-y-1 pl-1 text-xs text-faint">
+                      {s.spec?.capacity_mL ? <p>Capacity: {s.spec.capacity_mL} mL</p> : null}
+                      {s.spec?.needle_gauge ? <p>Needle gauge: {s.spec.needle_gauge}G</p> : null}
+                      {s.spec?.needle_length_in ? <p>Needle length: {s.spec.needle_length_in} in</p> : null}
+                      {s.spec?.unit_markings ? <p>Markings: {s.spec.unit_markings}</p> : null}
+                      {isOwner ? (
+                        <form action={archiveSyringe} className="pt-1">
+                          <input type="hidden" name="syringe_id" value={s.id} />
+                          <input type="hidden" name="return_to" value="/dashboard" />
+                          <button type="submit" className="text-faint underline hover:text-muted">
+                            Remove
+                          </button>
+                        </form>
+                      ) : null}
+                    </div>
+                  </details>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {isOwner && archivedMeds.length > 0 ? (
+          <section className="mt-8">
+            <details>
+              <summary className="mb-2 cursor-pointer list-none text-sm font-medium text-muted">
+                Archived ({archivedMeds.length})
+              </summary>
+              <ul className="divide-y divide-line overflow-hidden rounded-md border border-line">
+                {archivedMeds.map((m) => (
+                  <li
+                    key={m.id}
+                    className="flex items-center justify-between gap-3 px-4 py-3"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span
+                        aria-hidden
+                        className="h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ background: m.colour ?? "#777777" }}
+                      />
+                      <Link
+                        href={`/medications/${m.id}`}
+                        className="min-w-0 truncate text-sm text-paper blur-private hover:underline"
+                      >
+                        {m.display_name}
+                      </Link>
+                    </span>
+                    <form action={unarchiveMedication} className="shrink-0">
+                      <input type="hidden" name="medication_id" value={m.id} />
+                      <button
+                        type="submit"
+                        className="text-xs text-faint underline transition-colors hover:text-muted"
+                      >
+                        Add back
+                      </button>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          </section>
+        ) : null}
 
         {profile?.is_system_admin ? (
           <p className="mt-16 text-xs text-faint">

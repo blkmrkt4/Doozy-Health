@@ -15,9 +15,15 @@ const inputCls =
 // canonical_drug_id; typing a name with no match leaves it blank (free-text
 // entry is still first-class — PRD §4.2). The visible field is `drug_name`,
 // which the createMedication action reads as display_name.
-export function DrugSearch() {
-  const [value, setValue] = useState("");
-  const [canonicalId, setCanonicalId] = useState("");
+export function DrugSearch({
+  initialName = "",
+  initialCanonicalId = "",
+}: {
+  initialName?: string;
+  initialCanonicalId?: string;
+} = {}) {
+  const [value, setValue] = useState(initialName);
+  const [canonicalId, setCanonicalId] = useState(initialCanonicalId);
   const [results, setResults] = useState<Result[]>([]);
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
