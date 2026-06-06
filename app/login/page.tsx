@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { sendMagicLink, devSignIn } from "./actions";
@@ -21,9 +22,13 @@ export default async function LoginPage({
   return (
     <main className="flex min-h-screen items-center justify-center px-6">
       <div className="w-full max-w-sm">
-        <h1 className="text-2xl font-medium tracking-tight">
-          Doozy<span className="text-accent"> Health</span>
-        </h1>
+        <Link
+          href="/welcome"
+          className="inline-block text-2xl font-medium tracking-tight transition-opacity hover:opacity-80"
+          aria-label="WellKept welcome page"
+        >
+          WellKept<span className="text-accent text-[1.4em] leading-none">.</span>
+        </Link>
         <p className="mt-1 text-sm text-faint">Sign in to continue.</p>
 
         {sent ? (

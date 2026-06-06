@@ -1,4 +1,4 @@
-// Doozy Health — domain enums and shapes. These mirror the CHECK constraints
+// WellKept — domain enums and shapes. These mirror the CHECK constraints
 // in the migrations; keep the two in sync. British English in labels (PRD §6.1).
 
 // ── Routes of administration (PRD §4.2) ─────────────────────────────────────

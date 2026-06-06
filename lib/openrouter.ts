@@ -67,7 +67,7 @@ export async function callOpenRouter(
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
       "HTTP-Referer": "https://doozy.health",
-      "X-Title": "Doozy Health",
+      "X-Title": "WellKept",
     },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(opts?.timeoutMs ?? 30_000),

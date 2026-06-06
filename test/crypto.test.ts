@@ -22,7 +22,7 @@ describe("lib/crypto", () => {
   });
 
   it("handles unicode", () => {
-    const plaintext = "Doozy Health — wellness diary tool";
+    const plaintext = "WellKept — wellness diary tool";
     const envelope = encrypt(plaintext, KEY);
     expect(decrypt(envelope, KEY)).toBe(plaintext);
   });

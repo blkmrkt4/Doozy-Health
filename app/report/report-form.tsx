@@ -53,7 +53,7 @@ export function ReportForm({
       a.href = url;
       a.download =
         res.headers.get("content-disposition")?.match(/filename="(.+)"/)?.[1] ??
-        `Doozy Health — ${patientName} — ${from} to ${to}.pdf`;
+        `WellKept — ${patientName} — ${from} to ${to}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
     } catch {

@@ -6,7 +6,7 @@ import { ThemeToggle } from "./theme-toggle";
  * The theme switch lives here so it's reachable from every screen.
  */
 export const DISCLAIMER_TEXT =
-  "Doozy Health is a wellness tool. It is not a medical device and does not provide medical advice. Consult your doctor.";
+  "WellKept is a wellness tool. It is not a medical device and does not provide medical advice. Consult your doctor.";
 
 export function DisclaimerFooter() {
   return (

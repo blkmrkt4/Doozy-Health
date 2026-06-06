@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
   try {
     const pdf = await renderPdf(reportUrl);
 
-    const filename = `Doozy Health — ${patientName} — ${startDate} to ${endDate}.pdf`;
+    const filename = `WellKept — ${patientName} — ${startDate} to ${endDate}.pdf`;
 
     return new NextResponse(new Uint8Array(pdf), {
       headers: {

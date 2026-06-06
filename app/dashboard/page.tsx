@@ -419,9 +419,13 @@ export default async function DashboardPage({
       <header className="border-b border-line">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-6 py-4">
           <div className="flex items-center gap-3">
-            <span className="text-base font-medium tracking-tight">
-              Doozy<span className="text-accent"> Health</span>
-            </span>
+            <Link
+              href="/welcome"
+              className="text-base font-medium tracking-tight transition-opacity hover:opacity-80"
+              aria-label="WellKept welcome page"
+            >
+              WellKept<span className="text-accent text-[1.4em] leading-none">.</span>
+            </Link>
             {activePatient ? (
               allPatients.length > 1 ? (
                 <span className="text-sm">

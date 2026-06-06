@@ -3,14 +3,14 @@ import "./globals.css";
 import { DisclaimerFooter } from "./_components/disclaimer-footer";
 
 export const metadata: Metadata = {
-  title: "Doozy Health",
+  title: "WellKept",
   description:
     "A wellness diary tool for personal medication tracking and how you feel.",
-  applicationName: "Doozy Health",
+  applicationName: "WellKept",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
-    title: "Doozy Health",
+    title: "WellKept",
     statusBarStyle: "black-translucent",
   },
   formatDetection: {

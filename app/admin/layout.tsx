@@ -21,7 +21,7 @@ export default async function AdminLayout({
     <div className="mx-auto w-full max-w-5xl px-4 py-6">
       <header className="mb-8 flex items-center justify-between border-b border-white/10 pb-4">
         <Link href="/admin" className="text-lg font-semibold tracking-tight">
-          Doozy Admin
+          WellKept Admin
         </Link>
         <nav className="flex gap-4 text-sm">
           {NAV_LINKS.map((link) => (

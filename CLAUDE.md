@@ -1,10 +1,10 @@
-# CLAUDE.md — Doozy Health
+# CLAUDE.md — WellKept
 
 Operating guide for Claude Code on this project. Read this on every session, then read `PRD.md` end to end before answering questions about features, data model, or behaviour. The PRD is the source of truth for **what** to build; this file is **how** to build it and **what not to do**. If they disagree, stop and ask.
 
 When implementing, cite the PRD section in your plan (e.g. "extraction review card per §5.2.1") so drift is easy to spot.
 
-Doozy Health is a **wellness diary tool** for medication tracking — not a medical device, not medical advice. That is a regulatory position, not a tagline (see "Regulatory line" and PRD §6.1).
+WellKept is a **wellness diary tool** for medication tracking — not a medical device, not medical advice. That is a regulatory position, not a tagline (see "Regulatory line" and PRD §6.1).
 
 ---
 

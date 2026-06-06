@@ -1,6 +1,6 @@
 {
-  "name": "Doozy Health",
-  "short_name": "Doozy",
+  "name": "WellKept",
+  "short_name": "WellKept",
   "description": "A wellness diary tool for personal medication tracking and how you feel.",
   "start_url": "/dashboard",
   "display": "standalone",

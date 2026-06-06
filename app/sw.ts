@@ -39,7 +39,7 @@ self.addEventListener("push", ((event: PushEvent) => {
       url?: string;
     };
 
-    const title = payload.title ?? "Doozy Health";
+    const title = payload.title ?? "WellKept";
     const options = {
       body: payload.body ?? "",
       icon: "/icons/icon-192.png",
@@ -50,7 +50,7 @@ self.addEventListener("push", ((event: PushEvent) => {
     event.waitUntil(self.registration.showNotification(title, options));
   } catch {
     event.waitUntil(
-      self.registration.showNotification("Doozy Health", {
+      self.registration.showNotification("WellKept", {
         body: "You have a reminder.",
         icon: "/icons/icon-192.png",
       })

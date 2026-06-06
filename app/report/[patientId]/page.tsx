@@ -8,7 +8,7 @@ import "./report.css";
 // Disclaimer footer on every logical section (PRD §6.1).
 
 const DISCLAIMER =
-  "Doozy Health is a wellness tool. It is not a medical device and does not provide medical advice. Consult your doctor.";
+  "WellKept is a wellness tool. It is not a medical device and does not provide medical advice. Consult your doctor.";
 
 export default async function ReportPage({
   params,
@@ -155,7 +155,7 @@ export default async function ReportPage({
     <div className="report">
       {/* ── Cover ──────────────────────────────────────────────── */}
       <section className="report-cover">
-        <h1 className="report-title">Doozy Health</h1>
+        <h1 className="report-title">WellKept</h1>
         <h2 className="report-subtitle">{patient.name}</h2>
         <p className="report-dates">
           {startDate} to {endDate}
