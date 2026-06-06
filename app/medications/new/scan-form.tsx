@@ -95,7 +95,6 @@ export function ScanForm() {
               type="file"
               name="photo"
               accept="image/jpeg,image/png,image/heic,image/heif"
-              capture="environment"
               onClick={handlePickerOpen}
               onChange={handleFileChange}
               className="hidden"

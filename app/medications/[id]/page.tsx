@@ -787,7 +787,6 @@ export default async function MedicationDetailPage({
                 name="file"
                 required
                 accept="image/jpeg,image/png,image/heic,image/heif,application/pdf"
-                capture="environment"
                 className="text-sm text-muted file:mr-3 file:rounded-md file:border-0 file:bg-surface file:px-3 file:py-2 file:text-sm file:text-paper"
               />
               <button
