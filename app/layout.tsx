@@ -1,6 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { DisclaimerFooter } from "./_components/disclaimer-footer";
+import { AppNav } from "./_components/app-nav";
+import { createClient } from "@/lib/supabase/server";
+import { getActivePatient } from "@/lib/active-patient";
 
 export const metadata: Metadata = {
   title: "WellKept",
@@ -35,17 +38,31 @@ export const viewport: Viewport = {
 // stored choice, else fall back to the OS preference.
 const THEME_INIT = `(function(){try{var t=localStorage.getItem('theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}document.documentElement.setAttribute('data-theme',t);}catch(e){}})();`;
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  // The nav needs to know who's signed in (and renders nothing when nobody is),
+  // plus whether they own the active patient (to gate owner-only menu items).
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  let isOwner = false;
+  if (user) {
+    const active = await getActivePatient(supabase);
+    isOwner = active?.role === "owner";
+  }
+
   return (
     <html lang="en-GB" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
       </head>
       <body className="flex min-h-screen flex-col bg-ink text-paper antialiased">
+        {/* Global hybrid nav — self-hides on public/print/admin routes. */}
+        <AppNav userEmail={user?.email ?? null} isOwner={isOwner} />
         {/* The disclaimer footer is global so it cannot be omitted from any
             screen — PRD §6.1 requires it everywhere. */}
         <div className="flex-1">{children}</div>

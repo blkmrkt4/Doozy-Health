@@ -2,7 +2,6 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getActivePatient } from "@/lib/active-patient";
-import { signOut } from "@/app/login/actions";
 import { archiveSyringe } from "@/app/inventory/actions";
 import { unarchiveMedication } from "@/app/medications/actions";
 import { MedDoseRow } from "@/app/_components/med-dose-row";
@@ -10,7 +9,6 @@ import { dayKey } from "@/lib/schedule";
 import { acceptInvite, declineInvite } from "@/app/settings/caregivers/actions";
 import { formatRegimenSummary, relativeAge } from "@/lib/format";
 import { PatientSwitcher } from "@/app/_components/patient-switcher";
-import { PrivacyToggle } from "@/app/_components/privacy-toggle";
 import { CalendarSection } from "@/app/_components/calendar-section";
 import { PkChart } from "@/app/medications/[id]/timeline/pk-chart";
 import {
@@ -416,54 +414,24 @@ export default async function DashboardPage({
 
   return (
     <div className="min-h-full">
-      <header className="border-b border-line">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-6 py-4">
-          <div className="flex items-center gap-3">
-            <Link
-              href="/welcome"
-              className="text-base font-medium tracking-tight transition-opacity hover:opacity-80"
-              aria-label="WellKept welcome page"
-            >
-              WellKept<span className="text-accent text-[1.4em] leading-none">.</span>
-            </Link>
-            {activePatient ? (
-              allPatients.length > 1 ? (
-                <span className="text-sm">
-                  · <PatientSwitcher patients={allPatients} activeId={activePatient.id} />
-                </span>
-              ) : (
-                <span className="text-sm text-muted">
-                  · {activePatient.name}
-                  {activePatient.role !== "owner" ? (
-                    <span className="ml-1 text-faint">({activePatient.role})</span>
-                  ) : null}
-                </span>
-              )
-            ) : null}
-          </div>
-          <div className="flex items-center gap-3 text-sm">
-            <Link href="/diary" className="text-faint hover:text-muted">
-              Diary
-            </Link>
-            <PrivacyToggle />
-            <Link href="/report" className="text-faint hover:text-muted">
-              Export
-            </Link>
-            <Link href="/settings" className="text-faint hover:text-muted">
-              Settings
-            </Link>
-            <span className="text-faint">{profile?.email ?? user.email}</span>
-            <form action={signOut}>
-              <button
-                type="submit"
-                className="rounded-md border border-line px-3 py-1.5 text-muted transition-colors hover:bg-surface"
-              >
-                Sign out
-              </button>
-            </form>
+      {/* Patient context — global navigation lives in the app nav now; this
+          slim strip only carries the active-patient switcher / role. */}
+      {activePatient && (allPatients.length > 1 || activePatient.role !== "owner") ? (
+        <div className="border-b border-line">
+          <div className="mx-auto flex max-w-5xl items-center gap-2 px-6 py-2 text-sm">
+            {allPatients.length > 1 ? (
+              <PatientSwitcher patients={allPatients} activeId={activePatient.id} />
+            ) : (
+              <span className="text-muted">
+                {activePatient.name}
+                {activePatient.role !== "owner" ? (
+                  <span className="ml-1 text-faint">({activePatient.role})</span>
+                ) : null}
+              </span>
+            )}
           </div>
         </div>
-      </header>
+      ) : null}
 
       <main className="mx-auto max-w-5xl px-6 py-12">
         {/* Pending invites (PRD §4.5) */}

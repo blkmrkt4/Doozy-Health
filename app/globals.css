@@ -76,6 +76,10 @@
 html,
 body {
   height: 100%;
+  /* Never let the page scroll sideways. `clip` (not `hidden`) keeps the
+     sticky top bar working while still containing any too-wide content. */
+  overflow-x: clip;
+  max-width: 100%;
 }
 
 body {
@@ -88,6 +92,15 @@ body {
 /* Tabular figures for dose amounts and times (PRD §9). */
 .tabular {
   font-variant-numeric: tabular-nums;
+}
+
+/* Clear the fixed bottom tab bar on small screens so content / the disclaimer
+   footer is never hidden behind it. The nav toggles `nav-offset` on <body>
+   only on app screens (AppNav). */
+@media (max-width: 1023px) {
+  body.nav-offset {
+    padding-bottom: calc(4.25rem + env(safe-area-inset-bottom));
+  }
 }
 
 /* Privacy-mode blur (PRD §9). Applied to elements with .blur-private when
