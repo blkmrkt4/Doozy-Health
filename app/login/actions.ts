@@ -9,6 +9,13 @@ import { createAdminClient } from "@/lib/supabase/admin";
 // instant-login bypass so it can never be reached in a deployed environment.
 const DEV_AUTH_BYPASS = process.env.NODE_ENV !== "production";
 
+// Escape hatch for the deployed site while email delivery isn't set up: if
+// DEV_LOGIN_SECRET is configured (Vercel env), the instant sign-in works in
+// production too — but ONLY when the caller submits the matching secret. Unset
+// the env var to fully disable it. TEMPORARY — remove before real users (it
+// logs in as the owner with full access to patient data).
+const DEV_LOGIN_SECRET = process.env.DEV_LOGIN_SECRET;
+
 export async function sendMagicLink(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim();
   const next =
@@ -44,7 +51,13 @@ export async function sendMagicLink(formData: FormData) {
 // immediately, so the resulting session is a legitimate Supabase JWT — the same
 // auth path, minus the email hop. Hard-refuses outside a dev build.
 export async function devSignIn(formData: FormData) {
-  if (!DEV_AUTH_BYPASS) {
+  // Allowed in a dev build with no secret, OR anywhere DEV_LOGIN_SECRET is set
+  // AND the submitted secret matches. Keeps prod locked unless explicitly opted
+  // in, and never works in prod without the secret.
+  const submittedSecret = String(formData.get("secret") ?? "");
+  const secretOk =
+    Boolean(DEV_LOGIN_SECRET) && submittedSecret === DEV_LOGIN_SECRET;
+  if (!DEV_AUTH_BYPASS && !secretOk) {
     redirect(`/login?error=${encodeURIComponent("Dev bypass is disabled.")}`);
   }
 

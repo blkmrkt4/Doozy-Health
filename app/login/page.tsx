@@ -19,6 +19,11 @@ export default async function LoginPage({
 
   const sent = params.sent === "1";
 
+  // Instant dev sign-in: always shown locally; on the deployed site only when
+  // DEV_LOGIN_SECRET is configured, and then it requires typing that secret.
+  const showDevLogin = DEV_AUTH_BYPASS || Boolean(process.env.DEV_LOGIN_SECRET);
+  const requireSecret = !DEV_AUTH_BYPASS;
+
   return (
     <main className="flex min-h-screen items-center justify-center px-6">
       <div className="w-full max-w-sm">
@@ -64,12 +69,21 @@ export default async function LoginPage({
           </form>
         )}
 
-        {DEV_AUTH_BYPASS ? (
+        {showDevLogin ? (
           <form action={devSignIn} className="mt-6 border-t border-line pt-4">
             {params.next ? (
               <input type="hidden" name="next" value={params.next} />
             ) : null}
             <input type="hidden" name="email" value="blkmrkt.runner@gmail.com" />
+            {requireSecret ? (
+              <input
+                type="password"
+                name="secret"
+                placeholder="Dev login secret"
+                autoComplete="off"
+                className="mb-2 block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent"
+              />
+            ) : null}
             <button
               type="submit"
               className="block w-full rounded-md border border-line bg-surface px-4 py-2.5 text-sm font-medium text-muted transition-opacity hover:opacity-90"
@@ -77,7 +91,9 @@ export default async function LoginPage({
               Dev: instant sign-in
             </button>
             <p className="mt-2 text-xs text-faint">
-              Local only — skips email. Hidden in production builds.
+              {requireSecret
+                ? "Temporary bypass — remove DEV_LOGIN_SECRET to disable."
+                : "Local only — skips email."}
             </p>
           </form>
         ) : null}

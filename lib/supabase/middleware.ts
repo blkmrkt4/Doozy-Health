@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { env } from "@/lib/env";
 
-const PUBLIC_PATHS = ["/", "/login", "/auth/callback", "/auth/error"];
+const PUBLIC_PATHS = ["/", "/welcome", "/login", "/auth/callback", "/auth/error"];
 
 // PWA / install-time assets the browser fetches before any auth flow.
 // (PWA install lands in step 17; the whitelist is here from the start so
