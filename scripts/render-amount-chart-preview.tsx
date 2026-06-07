@@ -66,7 +66,7 @@ const buildingUp = {
   identityColor: ACCENT,
   nowDays: LEFT,
   nowDate: NOW,
-  cursorDate: addD(NOW, -7),
+  cursorDate: addD(NOW, -1),
 };
 
 const clearsBetween = {
@@ -119,7 +119,7 @@ const html = `<!doctype html>
 </style></head>
 <body><div class="wrap">
 ${card("Testosterone cypionate", "85 mg · 3× per week (255 mg/week) · IM", "accumulates → steady range", accumulating)}
-${card("Testosterone cypionate", "85 mg · 3× per week · calendar scrubbed to 7 days ago", "building up · read-out line", buildingUp)}
+${card("Testosterone cypionate", "85 mg · 3× per week · calendar scrubbed to yesterday (adjacent to today)", "building up · read-out line", buildingUp)}
 ${card("Testosterone cypionate", "50 mg every 4 weeks · IM", "clears between doses", clearsBetween)}
 </div></body></html>`;
 

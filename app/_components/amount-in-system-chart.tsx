@@ -194,12 +194,18 @@ export function AmountInSystemChart({
   //    from the shared calendar wheel above, so the chart just keeps headroom
   //    for the Today label + band caption. ────────────────────────────────────
   const W = 680;
-  const H = showDates ? 244 : 264;
+  // showDates reserves two stacked header rows above the plot — the scrubbed
+  // read-out and the Today label — so they can never overlap (they sit on
+  // different lines regardless of how close the two dates are).
+  const H = showDates ? 252 : 264;
   const padL = 46;
   const padR = 16;
-  const chartTop = showDates ? 44 : 18;
-  const chartBot = showDates ? 202 : 222;
+  const chartTop = showDates ? 60 : 18;
+  const chartBot = showDates ? 210 : 222;
   const plotW = W - padL - padR;
+  // Header label rows (only meaningful when showDates).
+  const cursorRowY = chartTop - 22; // upper row: scrubbed date read-out
+  const todayRowY = chartTop - 6; // lower row: Today · date
 
   let vmax = 0;
   for (const p of series) vmax = Math.max(vmax, p.v);
@@ -225,17 +231,17 @@ export function AmountInSystemChart({
   const todayX = hasNow ? x(nowDays as number) : null;
 
   // Scrubbed-date cursor: map the wheel's selected date onto the chart's t-axis.
-  // Suppressed when it lands on today (the Today line already marks it) or off
-  // the visible window.
-  const cursorT =
-    showDates && cursorDate
-      ? (nowDays as number) + (cursorDate.getTime() - (nowDate as Date).getTime()) / DAY_MS
+  // Compare CALENDAR days (not raw ms / rounded offsets) so a selection on today
+  // never draws a duplicate line just because "now" is a different time of day.
+  const startOfLocalDay = (d: Date) =>
+    new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const cursorDayDiff =
+    showDates && cursorDate && nowDate
+      ? Math.round((startOfLocalDay(cursorDate) - startOfLocalDay(nowDate)) / DAY_MS)
       : null;
+  const cursorT = cursorDayDiff != null ? (nowDays as number) + cursorDayDiff : null;
   const showCursor =
-    cursorT != null &&
-    cursorT >= 0 &&
-    cursorT <= ax.days &&
-    Math.round(cursorT) !== Math.round(nowDays as number);
+    cursorT != null && cursorDayDiff !== 0 && cursorT >= 0 && cursorT <= ax.days;
 
   const pathOf = (pts: SamplePoint[]) =>
     pts.map((p, i) => `${i ? "L" : "M"}${r1(x(p.t))} ${r1(y(p.v))}`).join(" ");
@@ -386,8 +392,8 @@ export function AmountInSystemChart({
   if (showDates && hasNow && todayX != null && nowDate) {
     push(
       <>
-        <line x1={r1(todayX)} y1={24} x2={r1(todayX)} y2={r1(chartBot)} stroke={INK2} strokeWidth={1.25} strokeDasharray="4 3" />
-        <text x={r1(todayX)} y={r1(chartTop - 4)} textAnchor="middle" style={{ fontSize: 11, fill: INK2 }}>Today · {fmtDate(nowDate)}</text>
+        <line x1={r1(todayX)} y1={r1(todayRowY + 4)} x2={r1(todayX)} y2={r1(chartBot)} stroke={INK2} strokeWidth={1.25} strokeDasharray="4 3" />
+        <text x={r1(todayX)} y={r1(todayRowY)} textAnchor="middle" style={{ fontSize: 11, fill: INK2 }}>Today · {fmtDate(nowDate)}</text>
       </>
     );
   } else if (hasNow && todayX != null) {
@@ -410,11 +416,13 @@ export function AmountInSystemChart({
     // keep the label inside the frame near the edges
     const anchor = cx > W - padR - 90 ? "end" : cx < padL + 90 ? "start" : "middle";
     const labelX = anchor === "end" ? cx - 4 : anchor === "start" ? cx + 4 : cx;
+    // Read-out sits on the UPPER header row; the Today label is on the row below,
+    // so the two never overlap even for adjacent dates.
     push(
       <>
-        <line x1={r1(cx)} y1={chartTop} x2={r1(cx)} y2={r1(chartBot)} stroke={identityColor} strokeWidth={1} strokeOpacity={0.9} />
+        <line x1={r1(cx)} y1={r1(cursorRowY + 4)} x2={r1(cx)} y2={r1(chartBot)} stroke={identityColor} strokeWidth={1} strokeOpacity={0.9} />
         <circle cx={r1(cx)} cy={r1(cy)} r={3.5} fill={identityColor} />
-        <text x={r1(labelX)} y={r1(chartTop - 4)} textAnchor={anchor} style={{ fontSize: 11, fill: INK2 }}>{label}</text>
+        <text x={r1(labelX)} y={r1(cursorRowY)} textAnchor={anchor} style={{ fontSize: 11, fill: INK2 }}>{label}</text>
       </>
     );
   }
