@@ -5,12 +5,12 @@ import { getActivePatient } from "@/lib/active-patient";
 import { archiveSyringe } from "@/app/inventory/actions";
 import { unarchiveMedication } from "@/app/medications/actions";
 import { MedDoseRow } from "@/app/_components/med-dose-row";
-import { dayKey } from "@/lib/schedule";
+import { dayKey, frequencyIntervalMs, occurrencesInWindow } from "@/lib/schedule";
 import { acceptInvite, declineInvite } from "@/app/settings/caregivers/actions";
 import { formatRegimenSummary, relativeAge } from "@/lib/format";
 import { PatientSwitcher } from "@/app/_components/patient-switcher";
 import { CalendarSection } from "@/app/_components/calendar-section";
-import { PkChart } from "@/app/medications/[id]/timeline/pk-chart";
+import { AmountInSystemChart } from "@/app/_components/amount-in-system-chart";
 import {
   buildWheelModel,
   type MedRegimen,
@@ -18,11 +18,13 @@ import {
   type DayLog,
   type MedLogMeta,
 } from "@/lib/adherence";
-import {
-  resolveParams,
-  buildMedicationPkSeries,
-  type DoseEvent,
-} from "@/lib/pharmacokinetics";
+import { resolveParams, type DoseEvent } from "@/lib/pharmacokinetics";
+import type {
+  DrugPK,
+  DoseEvent as AisDoseEvent,
+  PrescribedRegimen,
+  Route,
+} from "@/lib/pk/amountInSystem";
 import {
   isFrequency,
   INJECTABLE_FORM_TYPES,
@@ -30,6 +32,14 @@ import {
   type TrackedField,
   type DiaryEntry,
 } from "@/lib/types";
+
+type AmountChartProps = {
+  drug: DrugPK;
+  doses: AisDoseEvent[];
+  prescribed: PrescribedRegimen;
+  identityColor?: string;
+  nowDays: number;
+};
 
 type ChosenRow = {
   dose_amount: string;
@@ -297,7 +307,10 @@ export default async function DashboardPage({
   // Inline PK sparkline per card (PRD §5.7): illustrative modelled level from
   // logged doses + the chosen schedule reference. Deterministic (no LLM); only
   // linear drugs with PK reference data. Coarse step keeps N cards cheap.
-  const pkByMed = new Map<string, ReturnType<typeof buildMedicationPkSeries>>();
+  // Per-medication "amount in system" chart inputs (chart-guidance.md). Built
+  // from logged doses + the drug's PK params + the chosen regimen; the chart
+  // component does all display maths.
+  const amountChartByMed = new Map<string, AmountChartProps>();
   const pkDrugIds = Array.from(
     new Set(
       medications
@@ -341,20 +354,58 @@ export default async function DashboardPage({
         drug as unknown as Parameters<typeof resolveParams>[0],
         chosen.route
       );
-      if (!params || !params.isLinear) continue;
-      pkByMed.set(
-        m.id,
-        buildMedicationPkSeries({
-          params,
-          doseEvents: doseEventsByMed.get(m.id) ?? [],
-          now: nowMs,
-          pastDays: 30,
-          futureDays: 14,
-          scheduleFrequency: chosen.frequency,
-          scheduleDose: Number(chosen.dose_amount),
-          stepMs: 6 * 3_600_000,
-        })
-      );
+      if (!params) continue; // non-linear drugs still render (the "can't model" panel)
+
+      const intervalMs = frequencyIntervalMs(chosen.frequency);
+      const intervalDays = intervalMs ? intervalMs / 86_400_000 : 7;
+      const perDose = Number(chosen.dose_amount);
+      const dayOf = (ms: number) => (ms - pkPastMs) / 86_400_000;
+
+      const logged: AisDoseEvent[] = (doseEventsByMed.get(m.id) ?? []).map((e) => ({
+        t: dayOf(e.timestamp),
+        amount: e.amount,
+        taken: true,
+      }));
+      // Project the chosen cadence forward two weeks (dashed, after "now").
+      const future: AisDoseEvent[] = occurrencesInWindow(
+        chosen.frequency,
+        nowMs,
+        nowMs + 1,
+        nowMs + 14 * 86_400_000
+      ).map((ms) => ({ t: dayOf(ms), amount: perDose, taken: true }));
+
+      const perPeriodDose =
+        intervalDays > 0 ? Math.round(perDose * (7 / intervalDays)) : undefined;
+
+      const drugPk: DrugPK = {
+        name: m.display_name,
+        route: chosen.route as Route,
+        unit: chosen.dose_unit,
+        halfLifeDays: params.halfLifeHours / 24,
+        halfLifeRangeDays: params.halfLifeRange
+          ? [params.halfLifeRange[0] / 24, params.halfLifeRange[1] / 24]
+          : undefined,
+        isLinear: params.isLinear,
+        model: "amount_in_system",
+        provenance: "curated",
+      };
+
+      const prescribed: PrescribedRegimen = {
+        perDose,
+        intervalDays,
+        perPeriodDose,
+        perPeriodLabel: perPeriodDose
+          ? `${perPeriodDose} ${chosen.dose_unit} = one week's dose (what goes in)`
+          : undefined,
+      };
+
+      amountChartByMed.set(m.id, {
+        drug: drugPk,
+        doses: [...logged, ...future].sort((a, b) => a.t - b.t),
+        prescribed,
+        identityColor: m.colour ?? undefined,
+        nowDays: dayOf(nowMs),
+      });
     }
   }
 
@@ -527,7 +578,7 @@ export default async function DashboardPage({
               const chosen = (m.chosen_regimens ?? []).find((c) => c.active);
               const last = lastLogged.get(m.id);
               const medWheel = wheelByMed.get(m.id) ?? null;
-              const medPk = pkByMed.get(m.id) ?? null;
+              const medChart = amountChartByMed.get(m.id) ?? null;
               const todayD = medWheel ? medWheel.days[medWheel.todayIndex] : null;
               const todayMark = todayD?.meds.find((x) => x.medId === m.id);
               const todayTakenIds = todayD
@@ -606,15 +657,14 @@ export default async function DashboardPage({
                       />
                     </div>
                   ) : null}
-                  {medPk ? (
+                  {medChart ? (
                     <div className="mt-4">
-                      <p className="mb-1 text-xs text-faint">
-                        Modelled level — illustrative, past 30 / next 14 days
-                      </p>
-                      <PkChart
-                        series={medPk.series}
-                        overlay={medPk.overlay}
-                        height={170}
+                      <AmountInSystemChart
+                        drug={medChart.drug}
+                        doses={medChart.doses}
+                        prescribed={medChart.prescribed}
+                        identityColor={medChart.identityColor}
+                        nowDays={medChart.nowDays}
                       />
                     </div>
                   ) : null}
