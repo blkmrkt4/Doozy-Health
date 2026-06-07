@@ -3,15 +3,22 @@
 // Calibrated syringe visual (PRD §4.3, §9). Renders a syringe SVG scaled
 // to the user's actual syringe spec, showing the fill volume for the
 // chosen dose. Not decorative — calibrated to the syringe's real markings.
+//
+// Drawn HORIZONTALLY and stretched to the container width so the graduation
+// numbers are large enough to read on phone and desktop. Plunger on the left,
+// needle on the right; 0 sits at the needle end (where the liquid draws to) and
+// the scale increases toward the plunger, matching a real syringe.
 
 import { doseToVolumeMl, formatVolumeMl } from "@/lib/units";
 
-const SYRINGE_HEIGHT = 200;
-const SYRINGE_WIDTH = 60;
-const BARREL_TOP = 30;
-const BARREL_BOTTOM = 170;
-const BARREL_WIDTH = 30;
-const BARREL_LEFT = (SYRINGE_WIDTH - BARREL_WIDTH) / 2;
+const VB_W = 360;
+const VB_H = 96;
+const BARREL_LEFT = 40; // plunger end (= full capacity)
+const BARREL_RIGHT = 322; // needle end (= 0)
+const BARREL_TOP = 18;
+const BARREL_BOTTOM = 50;
+const BARREL_W = BARREL_RIGHT - BARREL_LEFT;
+const CENTER_Y = (BARREL_TOP + BARREL_BOTTOM) / 2;
 
 export function SyringeVisual({
   doseAmount,
@@ -41,123 +48,81 @@ export function SyringeVisual({
   );
 
   const fillFraction = Math.min(volumeMl / syringeCapacityMl, 1);
-  const barrelHeight = BARREL_BOTTOM - BARREL_TOP;
-  const fillHeight = barrelHeight * fillFraction;
-  const fillTop = BARREL_BOTTOM - fillHeight;
+  // 0 at the needle (right), full capacity at the plunger (left).
+  const xForFrac = (frac: number) => BARREL_RIGHT - BARREL_W * frac;
+  const fillX = xForFrac(fillFraction);
 
-  // Generate markings at even intervals.
+  // Markings at even intervals; label precision follows the step size so a
+  // 1 mL syringe reads 0.0–1.0 and a 0.5 mL one reads 0.00–0.50.
   const markCount = syringeCapacityMl <= 1 ? 10 : 5;
-  const markings: { y: number; label: string }[] = [];
-  for (let i = 0; i <= markCount; i++) {
+  const step = syringeCapacityMl / markCount;
+  const decimals = step < 0.1 ? 2 : step < 1 ? 1 : 0;
+  const markings = Array.from({ length: markCount + 1 }, (_, i) => {
     const frac = i / markCount;
-    const y = BARREL_BOTTOM - barrelHeight * frac;
-    const vol = syringeCapacityMl * frac;
-    markings.push({
-      y,
-      label: syringeCapacityMl <= 1 ? vol.toFixed(2) : vol.toFixed(1),
-    });
-  }
+    return {
+      x: xForFrac(frac),
+      label: (syringeCapacityMl * frac).toFixed(decimals),
+    };
+  });
 
   return (
-    <div className="flex flex-col items-center gap-2">
-      <svg
-        viewBox={`0 0 ${SYRINGE_WIDTH} ${SYRINGE_HEIGHT}`}
-        className="h-48 w-16"
-      >
-        {/* Plunger */}
-        <rect
-          x={BARREL_LEFT + BARREL_WIDTH / 2 - 2}
-          y={4}
-          width={4}
-          height={BARREL_TOP - 4}
-          rx={2}
-          fill="var(--color-faint)"
-        />
-        <rect
-          x={BARREL_LEFT + 2}
-          y={BARREL_TOP - 2}
-          width={BARREL_WIDTH - 4}
-          height={4}
-          rx={1}
-          fill="var(--color-faint)"
-        />
+    <div className="flex w-full max-w-xl flex-col gap-2">
+      <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="h-auto w-full">
+        {/* Plunger thumb rest + rod */}
+        <rect x={2} y={CENTER_Y - 13} width={5} height={26} rx={2} fill="var(--color-faint)" />
+        <rect x={7} y={CENTER_Y - 2} width={BARREL_LEFT - 7} height={4} rx={2} fill="var(--color-faint)" />
+        {/* Barrel finger flange (plunger end) */}
+        <rect x={BARREL_LEFT - 3} y={BARREL_TOP - 5} width={3} height={BARREL_BOTTOM - BARREL_TOP + 10} rx={1} fill="var(--color-faint)" />
 
         {/* Barrel outline */}
         <rect
           x={BARREL_LEFT}
           y={BARREL_TOP}
-          width={BARREL_WIDTH}
-          height={barrelHeight}
-          rx={2}
+          width={BARREL_W}
+          height={BARREL_BOTTOM - BARREL_TOP}
+          rx={3}
           fill="none"
           stroke="var(--color-faint)"
           strokeWidth={1.5}
         />
 
-        {/* Fill level */}
+        {/* Fill level — drawn from the needle (right) to the dose line */}
         <rect
-          x={BARREL_LEFT + 1}
-          y={fillTop}
-          width={BARREL_WIDTH - 2}
-          height={fillHeight}
-          rx={1}
-          fill="#F4EE35"
+          x={fillX}
+          y={BARREL_TOP + 1}
+          width={BARREL_RIGHT - fillX}
+          height={BARREL_BOTTOM - BARREL_TOP - 2}
+          rx={2}
+          fill="var(--color-accent)"
           opacity={0.3}
         />
-
         {/* Fill line (the "fill to this line" indicator) */}
-        <line
-          x1={BARREL_LEFT}
-          y1={fillTop}
-          x2={BARREL_LEFT + BARREL_WIDTH}
-          y2={fillTop}
-          stroke="#F4EE35"
-          strokeWidth={2}
-        />
+        <line x1={fillX} y1={BARREL_TOP - 2} x2={fillX} y2={BARREL_BOTTOM + 2} stroke="var(--color-accent)" strokeWidth={2.5} />
 
-        {/* Markings */}
+        {/* Needle */}
+        <line x1={BARREL_RIGHT} y1={CENTER_Y} x2={VB_W - 4} y2={CENTER_Y} stroke="var(--color-muted)" strokeWidth={1.5} />
+        <circle cx={VB_W - 3} cy={CENTER_Y} r={1.5} fill="var(--color-muted)" />
+
+        {/* Markings + labels */}
         {markings.map((m, i) => (
           <g key={i}>
-            <line
-              x1={BARREL_LEFT + BARREL_WIDTH}
-              y1={m.y}
-              x2={BARREL_LEFT + BARREL_WIDTH + 6}
-              y2={m.y}
-              stroke="var(--color-faint)"
-              strokeWidth={0.5}
-            />
+            <line x1={m.x} y1={BARREL_BOTTOM} x2={m.x} y2={BARREL_BOTTOM + 5} stroke="var(--color-faint)" strokeWidth={0.75} />
             <text
-              x={BARREL_LEFT + BARREL_WIDTH + 8}
-              y={m.y + 3}
-              className="fill-faint text-[7px]"
+              x={m.x}
+              y={BARREL_BOTTOM + 18}
+              textAnchor="middle"
+              fontSize={11}
+              className="tabular fill-muted"
             >
               {m.label}
             </text>
           </g>
         ))}
-
-        {/* Needle */}
-        <line
-          x1={SYRINGE_WIDTH / 2}
-          y1={BARREL_BOTTOM}
-          x2={SYRINGE_WIDTH / 2}
-          y2={SYRINGE_HEIGHT - 4}
-          stroke="var(--color-muted)"
-          strokeWidth={1}
-        />
-        <circle
-          cx={SYRINGE_WIDTH / 2}
-          cy={SYRINGE_HEIGHT - 3}
-          r={1}
-          fill="var(--color-muted)"
-        />
       </svg>
 
-      <p className="tabular text-center text-sm text-paper">
+      <p className="tabular text-sm text-paper">
         {formatVolumeMl(volumeMl, syringeCapacityMl)}
-      </p>
-      <p className="text-center text-xs text-faint">
-        Fill to the yellow line
+        <span className="ml-2 text-xs text-faint">Fill to the yellow line</span>
       </p>
     </div>
   );
