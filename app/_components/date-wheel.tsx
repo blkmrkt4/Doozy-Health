@@ -178,6 +178,11 @@ export function DateWheel({
           drag="x"
           dragConstraints={{ left: dragLeft, right: dragRight }}
           dragElastic={0.06}
+          // Reset on every pointer-down (a pure tap never fires onDragStart, so
+          // without this the flag stays true after a drag and taps get ignored).
+          onPointerDown={() => {
+            movedRef.current = false;
+          }}
           onDragStart={() => {
             movedRef.current = false;
           }}
@@ -185,6 +190,9 @@ export function DateWheel({
             if (Math.abs(info.offset.x) > 8) movedRef.current = true;
           }}
           onDragEnd={(_, info) => {
+            // A tap (no real movement) is handled by the cell's onClick — don't
+            // let a zero-distance drag-end snap back over the tapped date.
+            if (!movedRef.current) return;
             // Project momentum a little, then snap to the nearest day.
             const projected = x.get() + info.velocity.x * 0.06;
             settleTo(indexFromX(projected));
