@@ -43,16 +43,23 @@ export function DateWheel({
   model,
   selectedKey,
   onSelect,
+  onScrub,
 }: {
   model: WheelModel;
   selectedKey: string;
   onSelect: (key: string) => void;
+  // Fires (with the centred day's ms) each time the centred day changes —
+  // including mid-drag — so a synced view (e.g. the amount-in-system chart) can
+  // track the wheel. Optional: the standalone calendar ignores it.
+  onScrub?: (ms: number) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerW, setContainerW] = useState(0);
   const x = useMotionValue(0);
   const reduce = useReducedMotion();
   const movedRef = useRef(false);
+  const onScrubRef = useRef(onScrub);
+  onScrubRef.current = onScrub;
 
   const total = model.days.length;
   const selectedIndex = Math.max(
@@ -90,11 +97,17 @@ export function DateWheel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [containerW, selectedKey]);
 
-  // Keep the month/year header in step with the centred day during a drag.
+  // Keep the month/year header — and any synced view (onScrub) — in step with
+  // the centred day during a drag.
+  const scrubIndexRef = useRef(selectedIndex);
   useLayoutEffect(() => {
     const unsub = x.on("change", (xv) => {
       const i = indexFromX(xv);
-      setHeaderIndex((prev) => (prev === i ? prev : i));
+      if (i === scrubIndexRef.current) return;
+      scrubIndexRef.current = i;
+      setHeaderIndex(i);
+      const ms = model.days[i]?.ms;
+      if (ms != null) onScrubRef.current?.(ms);
     });
     return unsub;
     // eslint-disable-next-line react-hooks/exhaustive-deps

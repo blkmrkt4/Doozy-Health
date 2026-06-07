@@ -187,12 +187,19 @@ export function fractionToSteady(halfLifeDays: number, t: number): number {
 // patches/implants) the dose is NOT on board instantly — it rises to a peak
 // over ~Tmax (about a day or two), then declines. So the kernel is chosen from
 // the route, not a global default: depot esters use a first-order (Bateman)
-// absorption rise; patches/implants use a zero-order release plateau. Each
-// kernel is normalised to a UNIT PEAK so a dose's peak contribution ≈ its
-// amount in the drug's native unit (the reference's convention) — what changes
-// per route is the SHAPE of the rise, not the scale. For depot esters
-// absorption is rate-limiting (flip-flop kinetics): the rise spans ~Tmax and
-// the slow terminal decline reflects that release.
+// absorption rise; patches/implants use a zero-order release plateau.
+//
+// Every kernel is MASS-CONSERVING: absorption only DELAYS drug, it never
+// creates or destroys it, so each unit dose contributes the same total exposure
+// (∫kern = 1/ke) as an instant bolus. What changes per route is the SHAPE of
+// the rise, not the amount that accumulates — so a depot regimen plateaus at
+// the same textbook level as the bolus model, just with rounded waves instead
+// of spikes, and a single depot dose peaks BELOW its full amount (the rest is
+// still in the depot or already cleared). An earlier unit-peak normalisation
+// made prettier waves but silently inflated accumulation ~1.6×; mass-conserving
+// is the physically honest choice. For depot esters absorption is rate-limiting
+// (flip-flop kinetics): the rise spans ~Tmax and the slow terminal decline
+// reflects that release.
 
 /** How a single dose enters the system: a sharp add, a rounded rise, or a plateau. */
 export type CurveShape = "instant" | "first_order" | "zero_order";
@@ -223,9 +230,10 @@ function instantKernel(halfLifeDays: number): (dt: number) => number {
 }
 
 /**
- * First-order absorption (Bateman), normalised to a unit peak. Rises over ~Tmax
- * then declines on the terminal half-life. Ka is derived from Tmax when given,
- * else from a short default absorption half-life.
+ * First-order absorption (Bateman), mass-conserving (∫ = 1/ke, same total
+ * exposure as a bolus). Rises over ~Tmax then declines on the terminal
+ * half-life; the per-dose peak sits below the dose amount. Ka is derived from
+ * Tmax when given, else from a short default absorption half-life.
  */
 function firstOrderKernel(
   halfLifeDays: number,
@@ -240,16 +248,16 @@ function firstOrderKernel(
     ka = Math.LN2 / DEFAULT_ABSORPTION_HALF_LIFE_DAYS;
   }
   if (ka <= ke) ka = ke * 1.5; // guarantee absorption-then-elimination
-  const tp = Math.log(ka / ke) / (ka - ke);
-  const peak = Math.exp(-ke * tp) - Math.exp(-ka * tp);
+  // Standard Bateman scale ka/(ka−ke): conserves mass, ∫ = 1/ke per unit dose.
+  const scale = ka / (ka - ke);
   return (dt) =>
-    dt < 0 ? 0 : (Math.exp(-ke * dt) - Math.exp(-ka * dt)) / peak;
+    dt < 0 ? 0 : scale * (Math.exp(-ke * dt) - Math.exp(-ka * dt));
 }
 
 /**
- * Zero-order release over `releaseDays`, then first-order decay — normalised so
- * the level at end-of-release (the peak) is 1. Roughly flat while applied, then
- * decays after removal: a transdermal patch / implant.
+ * Zero-order release over `releaseDays`, then first-order decay — mass-conserving
+ * (∫ = 1/ke per unit dose). Roughly flat while applied, then decays after
+ * removal: a transdermal patch / implant.
  */
 function zeroOrderKernel(
   halfLifeDays: number,
@@ -257,11 +265,11 @@ function zeroOrderKernel(
 ): (dt: number) => number {
   const ke = Math.LN2 / halfLifeDays;
   const rate = 1 / releaseDays; // unit dose released over the window
-  const apeak = (rate / ke) * (1 - Math.exp(-ke * releaseDays));
   return (dt) => {
     if (dt < 0) return 0;
-    if (dt <= releaseDays) return ((rate / ke) * (1 - Math.exp(-ke * dt))) / apeak;
-    return Math.exp(-ke * (dt - releaseDays));
+    if (dt <= releaseDays) return (rate / ke) * (1 - Math.exp(-ke * dt));
+    const levelAtEnd = (rate / ke) * (1 - Math.exp(-ke * releaseDays));
+    return levelAtEnd * Math.exp(-ke * (dt - releaseDays));
   };
 }
 
@@ -316,6 +324,40 @@ export function regimeOf(R: number): Regime {
   if (R < 1.3) return "clears";
   if (R < 2) return "intermediate";
   return "accumulates";
+}
+
+/**
+ * The asymptotic steady range the PRESCRIBED schedule heads toward — simulate
+ * the regimen with this drug's route-aware kernel well past steady (~15
+ * half-lives) and read peak / trough / avg over the last interval. Unlike a
+ * windowed average of the live curve, this is a FIXED target the building-up
+ * curve approaches, so "building up toward ≈ X" means the destination, not a
+ * snapshot of where the curve currently sits. Mass-conserving kernels make this
+ * match the textbook bolus plateau (perDose / (k · interval)) for any route.
+ */
+export function steadyStateForDrug(
+  drug: DrugPK,
+  prescribed: PrescribedRegimen
+): { trough: number; peak: number; avg: number } {
+  const kern = doseKernel(drug);
+  const tau = prescribed.intervalDays;
+  const span = Math.max(15 * drug.halfLifeDays, 2 * tau) + 2 * tau;
+  const doseTs: number[] = [];
+  for (let t = 0; t <= span + 1e-9; t += tau) doseTs.push(t);
+  const amt = (t: number) =>
+    doseTs.reduce((s, d) => (d <= t ? s + prescribed.perDose * kern(t - d) : s), 0);
+  let mn = Infinity;
+  let mx = 0;
+  let sum = 0;
+  let n = 0;
+  for (let t = span - tau; t <= span + 1e-9; t += 0.05) {
+    const v = amt(t);
+    mn = Math.min(mn, v);
+    mx = Math.max(mx, v);
+    sum += v;
+    n += 1;
+  }
+  return { trough: mn, peak: mx, avg: sum / n };
 }
 
 /**

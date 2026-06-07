@@ -37,16 +37,36 @@ const ACCENT = "#1D9E75";
 
 const accumulating = {
   drug: TESTOSTERONE,
-  doses: repeating(67, 7 / 3),
+  doses: repeating(85, 7 / 3),
   prescribed: {
-    perDose: 67,
+    perDose: 85,
     intervalDays: 7 / 3,
-    perPeriodDose: 200,
-    perPeriodLabel: "200 mg per week (what goes in)",
+    perPeriodDose: 255,
+    perPeriodLabel: "255 mg = one week's dose (what goes in)",
   } as PrescribedRegimen,
   identityColor: ACCENT,
   nowDays: LEFT,
   nowDate: NOW,
+};
+
+const addD = (d: Date, n: number) => new Date(d.getTime() + n * 86_400_000);
+
+// A "building up" case: dosing only started ~18 days ago, so the curve is
+// partway up the ramp — shows the projected steady target + "≈ N% there".
+// cursorDate demonstrates the scrubbed read-out line (here: 7 days ago).
+const buildingUp = {
+  drug: TESTOSTERONE,
+  doses: repeating(85, 7 / 3).filter((d) => d.t >= LEFT - 18),
+  prescribed: {
+    perDose: 85,
+    intervalDays: 7 / 3,
+    perPeriodDose: 255,
+    perPeriodLabel: "255 mg = one week's dose (what goes in)",
+  } as PrescribedRegimen,
+  identityColor: ACCENT,
+  nowDays: LEFT,
+  nowDate: NOW,
+  cursorDate: addD(NOW, -7),
 };
 
 const clearsBetween = {
@@ -98,7 +118,8 @@ const html = `<!doctype html>
   .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);}
 </style></head>
 <body><div class="wrap">
-${card("Testosterone cypionate", "67 mg every ~2.3 days (≈200 mg/week) · IM", "accumulates → steady range", accumulating)}
+${card("Testosterone cypionate", "85 mg · 3× per week (255 mg/week) · IM", "accumulates → steady range", accumulating)}
+${card("Testosterone cypionate", "85 mg · 3× per week · calendar scrubbed to 7 days ago", "building up · read-out line", buildingUp)}
 ${card("Testosterone cypionate", "50 mg every 4 weeks · IM", "clears between doses", clearsBetween)}
 </div></body></html>`;
 

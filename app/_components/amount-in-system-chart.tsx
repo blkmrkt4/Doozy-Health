@@ -5,7 +5,8 @@ import {
   curveShape,
   accumulationRatio,
   regimeOf,
-  bandFromSeries,
+  steadyStateForDrug,
+  fractionToSteady,
   axisChoice,
   chooseWindowDays,
   type DrugPK,
@@ -43,7 +44,6 @@ const MONTHS = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
-const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
 const DAY_MS = 86_400_000;
 const addDays = (d: Date, n: number) => new Date(d.getTime() + n * DAY_MS);
 const fmtDate = (d: Date) => `${MONTHS[d.getMonth()]} ${d.getDate()}`;
@@ -64,6 +64,7 @@ export function AmountInSystemChart({
   show,
   nowDays,
   nowDate,
+  cursorDate,
   className,
 }: {
   drug: DrugPK;
@@ -73,8 +74,11 @@ export function AmountInSystemChart({
   show?: ShowFlags;
   /** "you are here": days from origin; past solid, future dashed */
   nowDays?: number;
-  /** the real calendar date at `nowDays`; enables the date axis + day strip */
+  /** the real calendar date at `nowDays`; enables the date axis */
   nowDate?: Date;
+  /** scrubbed date from the calendar wheel: draws a movable read-out line at
+   *  that date (suppressed when it equals today, where the Today line covers it) */
+  cursorDate?: Date;
   className?: string;
 }) {
   const title = `${drug.name} — amount in your system`;
@@ -140,15 +144,27 @@ export function AmountInSystemChart({
   const reachedSteady = haveHistory && dosingElapsed >= 5 * drug.halfLifeDays;
 
   // Steady band — only in an accumulating regime with at least some history.
-  // Derived from the modelled curve's projected steady tail so it always lines
-  // up with the drawn line, whatever the route's kernel.
+  // The band is the ASYMPTOTIC steady range the prescribed schedule heads
+  // toward (kernel-aware simulation past steady), not a windowed average of the
+  // still-building curve — so "building up toward ≈ X" names the destination.
   const wantBand =
     (show?.steadyBand ?? Boolean(prescribed)) &&
     accumulates &&
     haveHistory &&
     Boolean(prescribed);
-  const bandWin = Math.max(tau ?? 7, 7);
-  const band = wantBand ? bandFromSeries(series, ax.days - bandWin, ax.days) : null;
+  const band = wantBand && prescribed ? steadyStateForDrug(drug, prescribed) : null;
+  // How far up the ramp the logged history has actually climbed (descriptive
+  // only — §4.4; never a cue to act).
+  const percentToSteady =
+    band && !reachedSteady
+      ? Math.max(0, Math.min(99, Math.round(fractionToSteady(drug.halfLifeDays, dosingElapsed) * 100)))
+      : null;
+  // ~5 half-lives to settle — shown in plain language in the explainer.
+  const timeToSteadyDays = 5 * drug.halfLifeDays;
+  const timeToSteadyLabel =
+    timeToSteadyDays >= 14
+      ? `${Math.round(timeToSteadyDays / 7)} weeks`
+      : `${Math.round(timeToSteadyDays)} days`;
 
   // Clears-between reading (Fix 2): a per-dose peak and the pre-next trough.
   let clears: { peak: number; trough: number } | null = null;
@@ -174,14 +190,15 @@ export function AmountInSystemChart({
     accumulates;
   const annotateSteady = show?.annotateSteady ?? true;
 
-  // ── Geometry — reference v2 layout: a day strip on top, the chart below,
-  //    joined by the Today line. ─────────────────────────────────────────────
+  // ── Geometry. The day strip used to live on top of the chart; it now comes
+  //    from the shared calendar wheel above, so the chart just keeps headroom
+  //    for the Today label + band caption. ────────────────────────────────────
   const W = 680;
-  const H = showDates ? 300 : 264;
+  const H = showDates ? 244 : 264;
   const padL = 46;
   const padR = 16;
-  const chartTop = showDates ? 112 : 18;
-  const chartBot = showDates ? 262 : 222;
+  const chartTop = showDates ? 44 : 18;
+  const chartBot = showDates ? 202 : 222;
   const plotW = W - padL - padR;
 
   let vmax = 0;
@@ -206,6 +223,19 @@ export function AmountInSystemChart({
   const hasNow =
     typeof nowDays === "number" && nowDays > 0 && nowDays < ax.days;
   const todayX = hasNow ? x(nowDays as number) : null;
+
+  // Scrubbed-date cursor: map the wheel's selected date onto the chart's t-axis.
+  // Suppressed when it lands on today (the Today line already marks it) or off
+  // the visible window.
+  const cursorT =
+    showDates && cursorDate
+      ? (nowDays as number) + (cursorDate.getTime() - (nowDate as Date).getTime()) / DAY_MS
+      : null;
+  const showCursor =
+    cursorT != null &&
+    cursorT >= 0 &&
+    cursorT <= ax.days &&
+    Math.round(cursorT) !== Math.round(nowDays as number);
 
   const pathOf = (pts: SamplePoint[]) =>
     pts.map((p, i) => `${i ? "L" : "M"}${r1(x(p.t))} ${r1(y(p.v))}`).join(" ");
@@ -251,44 +281,6 @@ export function AmountInSystemChart({
     push(<text x={r1((padL + W - padR) / 2)} y={r1(baseY + 28)} textAnchor="middle" style={{ fontSize: 11, fill: INK3 }}>{ax.unitLabel}</text>);
   }
 
-  // ── Calendar strip synced to the chart (Fix 5). A zoomed day ruler centred
-  //    on today, with today at the SAME x as the chart's Today line. ──────────
-  if (showDates && nowDate && todayX != null) {
-    const weekdayY = 40;
-    const dateNumY = 60;
-    const doseDotY = 38;
-    const spd = plotW / 22; // ~22 days visible across the strip
-    const kStart = Math.ceil((padL - todayX) / spd);
-    const kEnd = Math.floor((W - padR - todayX) / spd);
-    for (let kk = kStart; kk <= kEnd; kk++) {
-      const dx = todayX + kk * spd;
-      const d = addDays(nowDate, kk);
-      push(<text x={r1(dx)} y={weekdayY} textAnchor="middle" style={{ fontSize: 10.5, fill: INK3 }}>{WEEKDAYS[d.getDay()]}</text>);
-      if (kk === 0)
-        push(<circle cx={r1(dx)} cy={dateNumY - 5} r={11} fill="none" stroke={identityColor} strokeWidth={1.5} />);
-      push(
-        <text
-          x={r1(dx)}
-          y={dateNumY}
-          textAnchor="middle"
-          style={{ fontSize: 12, fill: kk === 0 ? "var(--color-paper)" : INK2, fontWeight: kk === 0 ? 600 : 400 }}
-        >
-          {d.getDate()}
-        </text>
-      );
-    }
-    // dose dots on the strip: taken solid, missed hollow
-    for (const e of sorted) {
-      const dayoff = Math.round(e.t - (nowDays as number));
-      if (dayoff < kStart || dayoff > kEnd) continue;
-      const dx = todayX + dayoff * spd;
-      if (e.taken)
-        push(<circle cx={r1(dx)} cy={doseDotY} r={2.6} fill={identityColor} />);
-      else
-        push(<circle cx={r1(dx)} cy={doseDotY} r={2.4} fill="none" stroke={NEUTRAL} strokeWidth={1} />);
-    }
-  }
-
   // ── Steady band ───────────────────────────────────────────────────────────
   if (band) {
     const buildingUp = !reachedSteady;
@@ -298,7 +290,7 @@ export function AmountInSystemChart({
         <line x1={x(0)} y1={r1(y(band.avg))} x2={W - padR} y2={r1(y(band.avg))} stroke={identityColor} strokeWidth={1} strokeDasharray="4 3" strokeOpacity={buildingUp ? 0.6 : 1} />
         <text x={W - padR} y={r1(y(band.peak) - 5)} textAnchor="end" style={{ fontSize: 11, fill: INK2 }}>
           {buildingUp
-            ? `projected steady range ≈ ${Math.round(band.avg)} ${drug.unit} — building up`
+            ? `projected steady range ≈ ${Math.round(band.avg)} ${drug.unit} — building up${percentToSteady != null ? ` (≈ ${percentToSteady}% there)` : ""}`
             : `steady range ≈ ${Math.round(band.avg)} ${drug.unit} on board`}
         </text>
       </>
@@ -408,6 +400,25 @@ export function AmountInSystemChart({
     );
   }
 
+  // ── Scrubbed-date read-out: a movable line + dot showing the modelled level
+  //    on the date centred in the calendar wheel above. ───────────────────────
+  if (showCursor && cursorDate && cursorT != null) {
+    const cx = x(cursorT);
+    const level = amountFn(cursorT);
+    const cy = y(Math.min(YMAX, level));
+    const label = `${fmtDate(cursorDate)} · ≈ ${Math.round(level)} ${drug.unit}`;
+    // keep the label inside the frame near the edges
+    const anchor = cx > W - padR - 90 ? "end" : cx < padL + 90 ? "start" : "middle";
+    const labelX = anchor === "end" ? cx - 4 : anchor === "start" ? cx + 4 : cx;
+    push(
+      <>
+        <line x1={r1(cx)} y1={chartTop} x2={r1(cx)} y2={r1(chartBot)} stroke={identityColor} strokeWidth={1} strokeOpacity={0.9} />
+        <circle cx={r1(cx)} cy={r1(cy)} r={3.5} fill={identityColor} />
+        <text x={r1(labelX)} y={r1(chartTop - 4)} textAnchor={anchor} style={{ fontSize: 11, fill: INK2 }}>{label}</text>
+      </>
+    );
+  }
+
   const regimeSummary = clears
     ? `largely clears between doses (peaks ≈ ${Math.round(clears.peak)} ${drug.unit})`
     : band
@@ -418,6 +429,41 @@ export function AmountInSystemChart({
   const summary = `${drug.name} amount in system over about ${Math.round(ax.days / ax.unitDays)} ${ax.unitLabel}: rises then ${regimeSummary}${
     wantPeriod && prescribed?.perPeriodDose ? `, above the ${prescribed.perPeriodDose} ${drug.unit} per-period input line` : ""
   }.`;
+
+  // ── Plain-language explainer (tap to expand). Pure HTML <details>, so it
+  //    works without client JS. Copy stays on the §6.1 wellness line:
+  //    illustrative, never "your actual level", never an instruction to dose. ─
+  const weeklyInput =
+    wantPeriod && prescribed?.perPeriodDose ? prescribed.perPeriodDose : null;
+  let explainer: ReactNode = null;
+  if (band) {
+    explainer = (
+      <>
+        Each dose adds to what&rsquo;s already in your system, then fades on the
+        medication&rsquo;s half-life. Because the next dose tends to arrive before the
+        last has cleared, the modelled amount climbs for about {timeToSteadyLabel}{" "}
+        and then settles into a repeating range — here about{" "}
+        {Math.round(band.avg)} {drug.unit}
+        {weeklyInput
+          ? `, higher than the ${weeklyInput} ${drug.unit} that goes in each week because earlier doses are still on board`
+          : ""}
+        . This is illustrative, based on textbook half-life — not a measurement of
+        your actual level. A blood test with your clinician is what confirms that.
+        Missed doses show up as the modelled line dipping below this range.
+      </>
+    );
+  } else if (regime === "clears") {
+    explainer = (
+      <>
+        Because the gap between doses is long compared with the medication&rsquo;s
+        half-life, most of each dose clears before the next — so the modelled
+        amount rises after a dose and falls back toward zero instead of leveling
+        off into a plateau. This is illustrative, based on textbook half-life —
+        not a measurement of your actual level; a blood test with your clinician
+        confirms that.
+      </>
+    );
+  }
 
   return (
     <figure className={className} style={{ margin: 0 }}>
@@ -430,6 +476,16 @@ export function AmountInSystemChart({
         <title>{title}</title>
         {els}
       </svg>
+      {explainer ? (
+        <details style={{ marginTop: 6 }}>
+          <summary style={{ fontSize: 12, color: "var(--color-muted)", cursor: "pointer" }}>
+            {band ? "How the steady range is worked out" : "How this reads"}
+          </summary>
+          <p style={{ fontSize: 12, lineHeight: 1.5, color: "var(--color-muted)", marginTop: 6 }}>
+            {explainer}
+          </p>
+        </details>
+      ) : null}
       <figcaption style={{ fontSize: 11, color: "var(--color-faint)", marginTop: 6 }}>
         {footer}
       </figcaption>

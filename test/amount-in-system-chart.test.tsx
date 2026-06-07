@@ -31,8 +31,9 @@ describe("AmountInSystemChart", () => {
     expect(html).toContain("one week&#x27;s dose"); // period reference (the input)
     expect(html).toContain("not medical advice"); // footer always present
     expect(html).toContain("weeks"); // weeks axis for an 8-day half-life
-    // never alarm-red / warning colour on this chart
-    expect(html.toLowerCase()).not.toMatch(/red|crimson|#f00|#ff0000/);
+    // never alarm-red / warning colour on this chart (word-boundary so prose
+    // like "cleared" doesn't false-positive on the substring "red")
+    expect(html.toLowerCase()).not.toMatch(/\bred\b|crimson|#f00\b|#ff0000|tomato|firebrick/);
   });
 
   it("anchors the x-axis to real dates with a labelled Today line when given nowDate", () => {

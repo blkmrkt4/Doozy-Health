@@ -10,7 +10,7 @@ import { acceptInvite, declineInvite } from "@/app/settings/caregivers/actions";
 import { formatRegimenSummary, relativeAge } from "@/lib/format";
 import { PatientSwitcher } from "@/app/_components/patient-switcher";
 import { CalendarSection } from "@/app/_components/calendar-section";
-import { AmountInSystemChart } from "@/app/_components/amount-in-system-chart";
+import { MedTimeline } from "@/app/_components/med-timeline";
 import {
   buildWheelModel,
   type MedRegimen,
@@ -657,24 +657,16 @@ export default async function DashboardPage({
                     />
                   ) : null}
                   </div>
-                  {medWheel ? (
+                  {medWheel && medChart ? (
+                    // Shared timeline: the wheel scrubs a read-out line on the
+                    // chart; the chart drops its own duplicate day strip.
+                    <MedTimeline wheelModel={medWheel} chart={medChart} />
+                  ) : medWheel ? (
                     <div className="mt-4">
                       <CalendarSection
                         model={medWheel}
                         medNames={medNames}
                         variant="bar"
-                      />
-                    </div>
-                  ) : null}
-                  {medChart ? (
-                    <div className="mt-4">
-                      <AmountInSystemChart
-                        drug={medChart.drug}
-                        doses={medChart.doses}
-                        prescribed={medChart.prescribed}
-                        identityColor={medChart.identityColor}
-                        nowDays={medChart.nowDays}
-                        nowDate={medChart.nowDate}
                       />
                     </div>
                   ) : null}
