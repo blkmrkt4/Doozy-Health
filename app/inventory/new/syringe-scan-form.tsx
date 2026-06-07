@@ -3,6 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { uploadAndExtractSyringe } from "@/app/inventory/actions";
+import { toUploadJpeg } from "@/lib/image-client";
 
 // Scan a syringe packaging photo — choosing a photo uploads + extracts in one
 // tap (mirrors the medication ScanForm). American English.
@@ -35,6 +36,8 @@ export function SyringeScanForm() {
     const fd = new FormData(formRef.current);
     startTransition(async () => {
       try {
+        // Re-encode to a downscaled JPEG (HEIC → JPEG) for the vision model.
+        fd.set("photo", await toUploadJpeg(file));
         await uploadAndExtractSyringe(fd);
       } catch (err) {
         if (isRedirectError(err)) throw err;

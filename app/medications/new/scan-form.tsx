@@ -3,6 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { uploadAndExtract } from "@/app/medications/actions";
+import { toUploadJpeg } from "@/lib/image-client";
 
 // Scan form: choosing a photo immediately uploads and extracts — one tap, no
 // separate button. An animated beaker fills while the LLM processes.
@@ -49,6 +50,9 @@ export function ScanForm() {
     const fd = new FormData(formRef.current);
     startTransition(async () => {
       try {
+        // Re-encode to a downscaled JPEG so iPhone HEIC photos (which the vision
+        // models reject) become a format they can read.
+        fd.set("photo", await toUploadJpeg(file));
         await uploadAndExtract(fd);
       } catch (err) {
         // A successful or handled run ends in a redirect (the framework
