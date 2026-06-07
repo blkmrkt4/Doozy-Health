@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { uploadAndExtract } from "@/app/medications/actions";
 import { toUploadJpeg } from "@/lib/image-client";
@@ -20,44 +20,55 @@ function isRedirectError(err: unknown): boolean {
   );
 }
 
+const MAX_PHOTOS = 5;
+
 export function ScanForm() {
   const router = useRouter();
-  const formRef = useRef<HTMLFormElement>(null);
-  const [fileName, setFileName] = useState<string | null>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const libraryRef = useRef<HTMLInputElement>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  function handlePickerOpen() {
-    // Starting a new scan should clear any leftover message from the previous
-    // attempt: the inline one (client state) and the top-of-page one (the
-    // server-rendered ?error= param), so a stale notice doesn't linger.
+  // Object-URL thumbnails, revoked when the set changes / on unmount.
+  useEffect(() => {
+    const urls = files.map((f) => URL.createObjectURL(f));
+    setPreviews(urls);
+    return () => urls.forEach(URL.revokeObjectURL);
+  }, [files]);
+
+  function clearStaleError() {
+    // Clear a leftover message from a previous attempt: the inline one (client
+    // state) and the top-of-page one (the server-rendered ?error= param).
     setError(null);
     router.replace("/medications/new");
   }
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file || !formRef.current) {
-      setFileName(null);
-      return;
-    }
-    setFileName(file.name);
-    setError(null);
+  function addFiles(list: FileList | null) {
+    if (!list || list.length === 0) return;
+    clearStaleError();
+    setFiles((prev) => [...prev, ...Array.from(list)].slice(0, MAX_PHOTOS));
+  }
 
-    // Snapshot the form data now (the form unmounts once the beaker shows),
-    // then await the action so the pending state — and the beaker — stay up
-    // for the whole upload + extraction, and its redirect actually applies.
-    const fd = new FormData(formRef.current);
+  function removeAt(i: number) {
+    setFiles((prev) => prev.filter((_, j) => j !== i));
+  }
+
+  function extract() {
+    if (files.length === 0) return;
+    setError(null);
     startTransition(async () => {
       try {
-        // Re-encode to a downscaled JPEG so iPhone HEIC photos (which the vision
-        // models reject) become a format they can read.
-        fd.set("photo", await toUploadJpeg(file));
+        const fd = new FormData();
+        fd.set("document_type", "vial_photo"); // auto-detect switches if needed
+        // Re-encode each photo to a downscaled JPEG so iPhone HEIC photos (which
+        // the vision models reject) become a format they can read.
+        for (const f of files) fd.append("photo", await toUploadJpeg(f));
         await uploadAndExtract(fd);
       } catch (err) {
-        // A successful or handled run ends in a redirect (the framework
-        // navigates — not caught here). This only fires for an unexpected
-        // throw, which would otherwise leave the beaker vanishing in silence.
+        // A handled run ends in a redirect (re-thrown for the framework). This
+        // only fires for an unexpected throw.
         if (isRedirectError(err)) throw err;
         setError(
           "Something went wrong starting the scan. Please try again, or enter the details manually below."
@@ -65,6 +76,8 @@ export function ScanForm() {
       }
     });
   }
+
+  const full = files.length >= MAX_PHOTOS;
 
   return (
     <section className="mt-6 rounded-md border border-line p-4 space-y-3">
@@ -75,44 +88,110 @@ export function ScanForm() {
       </p>
 
       {isPending ? (
-        <ExtractingIndicator />
+        <ExtractingIndicator count={files.length} />
       ) : (
-        <form ref={formRef} action={uploadAndExtract} className="space-y-3">
-          {/* No type picker: the extractor reads the photo, defaults to a vial,
-              and transparently switches to the prescription reader (and back)
-              when the photo is actually the other kind (see uploadAndExtract). */}
+        <div className="space-y-3">
+          {/* Camera vs library are separate inputs so the camera option is
+              always offered (some Android browsers skip it otherwise), and the
+              library can pick several at once. */}
+          <input
+            ref={cameraRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => {
+              addFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <input
+            ref={libraryRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              addFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
 
-          {/* File input styled via the label — choosing a photo starts
-              extraction immediately, so this is the only control needed. */}
-          <label className="block cursor-pointer rounded-md border border-dashed border-line bg-surface px-3 py-2.5 text-center text-sm transition-colors hover:border-muted">
-            <input
-              type="file"
-              name="photo"
-              accept="image/jpeg,image/png,image/heic,image/heif"
-              onClick={handlePickerOpen}
-              onChange={handleFileChange}
-              className="hidden"
-            />
-            {fileName ? (
-              <span className="text-paper">{fileName}</span>
-            ) : (
-              <span className="text-faint">Tap to choose a photo — extracts automatically</span>
-            )}
-          </label>
+          {previews.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {previews.map((src, i) => (
+                <div key={i} className="relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={src}
+                    alt={`Photo ${i + 1}`}
+                    className="h-16 w-16 rounded-md border border-line object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeAt(i)}
+                    aria-label={`Remove photo ${i + 1}`}
+                    className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-line bg-surface text-xs text-muted hover:text-paper"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={full}
+              onClick={() => cameraRef.current?.click()}
+              className="flex items-center gap-1.5 rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper transition-colors hover:border-muted disabled:opacity-50"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+                <circle cx="12" cy="13" r="3" />
+              </svg>
+              Take photo
+            </button>
+            <button
+              type="button"
+              disabled={full}
+              onClick={() => libraryRef.current?.click()}
+              className="rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper transition-colors hover:border-muted disabled:opacity-50"
+            >
+              {files.length > 0 ? "Add from photos" : "Choose photos"}
+            </button>
+          </div>
+
+          {/* Multi-photo guidance — for curved vials / bottles whose label
+              wraps out of one frame. */}
+          <p className="text-xs text-faint">
+            On a curved vial or bottle the label often won&rsquo;t fit in one
+            shot. Add a few photos of the different sides
+            {full ? " (max 5)" : ""} — we&rsquo;ll read them together.
+          </p>
+
+          {files.length > 0 ? (
+            <button
+              type="button"
+              onClick={extract}
+              className="w-full rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-on-accent transition-opacity hover:opacity-90"
+            >
+              Extract {files.length} photo{files.length > 1 ? "s" : ""}
+            </button>
+          ) : null}
 
           {error ? (
-            <p className="rounded-md border alert-error p-3 text-sm">
-              {error}
-            </p>
+            <p className="rounded-md border alert-error p-3 text-sm">{error}</p>
           ) : null}
-        </form>
+        </div>
       )}
     </section>
   );
 }
 
 /** Animated beaker filling indicator while the LLM works. */
-function ExtractingIndicator() {
+function ExtractingIndicator({ count = 1 }: { count?: number }) {
   return (
     <div className="flex flex-col items-center gap-4 py-8">
       <div className="relative">
@@ -149,7 +228,7 @@ function ExtractingIndicator() {
       <div className="text-center">
         <p className="text-sm font-medium text-paper">Extracting...</p>
         <p className="mt-1 text-xs text-faint">
-          Reading the photo and pulling out the details
+          Reading {count > 1 ? `${count} photos` : "the photo"} and pulling out the details
         </p>
       </div>
     </div>

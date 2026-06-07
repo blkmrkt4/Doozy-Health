@@ -11,7 +11,9 @@ import { deflateSync } from "node:zlib";
 //
 // dotenv must load BEFORE importing app modules (lib/env reads process.env at
 // import time), so app modules are imported dynamically after config().
-config({ path: ".env.local" });
+// Point it at another environment (e.g. production) with ENV_FILE:
+//   ENV_FILE=.env.production npx vite-node scripts/diagnose-llm.ts
+config({ path: process.env.ENV_FILE || ".env.local" });
 
 const mask = (v?: string | null) =>
   v ? `${v.slice(0, 6)}…${v.slice(-4)} (${v.length} chars)` : "(missing)";

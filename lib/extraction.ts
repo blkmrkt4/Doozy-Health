@@ -203,7 +203,7 @@ function parseSyringeExtraction(raw: string): SyringeExtraction | null {
  */
 export async function extractSyringe(
   documentId: string,
-  imageBase64: string,
+  images: string | string[],
   knownSyringeTypes: string
 ): Promise<SyringeExtractionResult> {
   const admin = createAdminClient();
@@ -212,7 +212,7 @@ export async function extractSyringe(
   const result = await llmCall(
     "extract_syringe",
     { syringe_reference_types: knownSyringeTypes },
-    { images: [imageBase64] }
+    { images: Array.isArray(images) ? images : [images] }
   );
 
   if (!result.ok) {
@@ -260,7 +260,7 @@ export async function extractSyringe(
  */
 export async function extractVial(
   documentId: string,
-  imageBase64: string,
+  images: string | string[],
   patientMedications: string,
   defaultUnits: string
 ): Promise<ExtractionResult> {
@@ -272,13 +272,14 @@ export async function extractVial(
     .update({ status: "processing" })
     .eq("id", documentId);
 
+  // Multiple photos (e.g. different sides of a curved vial) are read together.
   const result = await llmCall(
     "extract_vial",
     {
       known_medications: patientMedications,
       user_default_units: defaultUnits,
     },
-    { images: [imageBase64] }
+    { images: Array.isArray(images) ? images : [images] }
   );
 
   if (!result.ok) {
@@ -353,7 +354,7 @@ export async function extractVial(
  */
 export async function extractPrescription(
   documentId: string,
-  imageBase64OrText: string,
+  imageBase64OrText: string | string[],
   patientMedications: string,
   isText: boolean = false
 ): Promise<ExtractionResult> {
@@ -364,15 +365,19 @@ export async function extractPrescription(
     .update({ status: "processing" })
     .eq("id", documentId);
 
+  const textValue = typeof imageBase64OrText === "string" ? imageBase64OrText : "";
   const vars: Record<string, string> = {
     known_medications: patientMedications,
-    prescription_text: isText ? imageBase64OrText : "(see attached)",
+    prescription_text: isText ? textValue : "(see attached)",
   };
 
+  const images = Array.isArray(imageBase64OrText)
+    ? imageBase64OrText
+    : [imageBase64OrText];
   const result = await llmCall(
     "extract_prescription",
     vars,
-    isText ? undefined : { images: [imageBase64OrText] }
+    isText ? undefined : { images }
   );
 
   if (!result.ok) {

@@ -867,18 +867,28 @@ export async function uploadAndExtract(formData: FormData) {
     ? "prescription_scan" as const
     : "vial_photo" as const;
 
-  const file = formData.get("photo");
-  if (!(file instanceof File) || file.size === 0) {
+  // One or more photos (e.g. different sides of a curved vial). They are read
+  // together by the model; the FIRST is stored as the document of record.
+  const MAX_PHOTOS = 5;
+  const photos = formData
+    .getAll("photo")
+    .filter((f): f is File => f instanceof File && f.size > 0)
+    .slice(0, MAX_PHOTOS);
+
+  if (photos.length === 0) {
     failExtract("Choose a photo to scan.");
   }
-  if (!isAllowedMime(file.type) || file.type === "application/pdf") {
-    failExtract("Please use an image file (JPEG, PNG, or HEIC).");
+  for (const f of photos) {
+    if (!isAllowedMime(f.type) || f.type === "application/pdf") {
+      failExtract("Please use image files (JPEG, PNG, or HEIC).");
+    }
+    if (f.size > MAX_DOCUMENT_BYTES) {
+      failExtract("One of the photos is larger than the 25 MB limit.");
+    }
   }
-  if (file.size > MAX_DOCUMENT_BYTES) {
-    failExtract("File is larger than the 25 MB limit.");
-  }
+  const file = photos[0];
 
-  // Upload the document.
+  // Upload the first photo as the document of record.
   const docId = crypto.randomUUID();
   const path = `${active.id}/${docId}.${extForMime(file.type)}`;
 
@@ -902,9 +912,13 @@ export async function uploadAndExtract(formData: FormData) {
     failExtract(`Could not save the document: ${rowErr.message}`);
   }
 
-  // Convert to base64 data URL for the LLM.
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const base64 = `data:${file.type};base64,${buffer.toString("base64")}`;
+  // Convert every photo to a base64 data URL for the LLM.
+  const base64s: string[] = [];
+  for (const f of photos) {
+    const buffer = Buffer.from(await f.arrayBuffer());
+    base64s.push(`data:${f.type};base64,${buffer.toString("base64")}`);
+  }
+  const base64 = base64s;
 
   // Gather existing medication names for context.
   const { data: meds } = await supabase
