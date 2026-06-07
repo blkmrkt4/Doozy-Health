@@ -199,39 +199,48 @@ export function MedDoseRow({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-      <span
-        className="h-2.5 w-2.5 shrink-0 rounded-full"
-        style={{ backgroundColor: medColour }}
-        aria-hidden
-      />
-      <span className="font-medium text-paper blur-private">{medName}</span>
-
-      {meta ? (
-        <span className="flex items-center gap-1 text-muted">
-          {canLog ? (
-            <input
-              type="number"
-              min={0}
-              step="any"
-              value={dose}
-              onChange={(e) => setDose(e.target.value)}
-              aria-label="Dose"
-              className="w-14 rounded-md border border-line bg-surface px-2 py-0.5 text-sm tabular text-paper outline-none focus:border-accent"
-            />
-          ) : (
-            <span className="tabular">{dose}</span>
-          )}
-          <span>{doseUnitLabel}</span>
-          <span className="text-faint">{meta.defaultRoute}</span>
+    // On phones (< sm) the name and the dose stack onto two lines; from sm up
+    // they sit inline on one row. The check-dots stay centred on the right.
+    <div className="flex items-center gap-x-2 text-sm">
+      <div className="flex min-w-0 flex-1 flex-col gap-y-1 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2">
+        <span className="flex min-w-0 items-center gap-2">
+          <span
+            className="h-2.5 w-2.5 shrink-0 rounded-full"
+            style={{ backgroundColor: medColour }}
+            aria-hidden
+          />
+          <span className="truncate font-medium text-paper blur-private">{medName}</span>
         </span>
-      ) : null}
 
-      <span className={`text-xs ${complete ? "" : "text-faint"}`} style={complete ? { color: GREEN } : undefined}>
-        {complete ? "complete" : `${optimistic} of ${scheduled}`}
-      </span>
+        {/* Dose + status — line two on a phone, indented to sit under the name. */}
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-[18px] sm:pl-0">
+          {meta ? (
+            <span className="flex items-center gap-1 text-muted">
+              {canLog ? (
+                <input
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={dose}
+                  onChange={(e) => setDose(e.target.value)}
+                  aria-label="Dose"
+                  className="w-14 rounded-md border border-line bg-surface px-2 py-0.5 text-sm tabular text-paper outline-none focus:border-accent"
+                />
+              ) : (
+                <span className="tabular">{dose}</span>
+              )}
+              <span>{doseUnitLabel}</span>
+              <span className="text-faint">{meta.defaultRoute}</span>
+            </span>
+          ) : null}
 
-      <div className="ml-auto">{dots}</div>
+          <span className={`text-xs ${complete ? "" : "text-faint"}`} style={complete ? { color: GREEN } : undefined}>
+            {complete ? "complete" : `${optimistic} of ${scheduled}`}
+          </span>
+        </span>
+      </div>
+
+      <div className="ml-auto shrink-0">{dots}</div>
     </div>
   );
 }
