@@ -148,16 +148,39 @@ export async function llmCall(
   const admin = createAdminClient();
 
   // 1. Load prompt (must be active with a current version).
+  // maybeSingle so "no such prompt" returns null (not a PGRST116 error) — that
+  // way promptErr means a real DB / service-role failure, distinct from a
+  // genuinely missing prompt.
   const { data: prompt, error: promptErr } = await admin
     .from("prompts")
     .select("id, current_version_id, status")
     .eq("slug", promptSlug)
-    .single();
+    .maybeSingle();
 
   if (promptErr || !prompt) {
+    // A query error here means we could NOT reach the prompts table with the
+    // service-role client (bad SUPABASE_SERVICE_ROLE_KEY, network, RLS-on-an-
+    // admin-table) — a different failure from a genuinely missing prompt. Make
+    // the distinction loud so it is diagnosable (slug + db error only).
+    if (promptErr) {
+      logError("llm", "Could not load prompt — database / service-role error", promptErr, {
+        promptSlug,
+        hint: "check SUPABASE_SERVICE_ROLE_KEY; the admin client bypasses RLS",
+      });
+      return {
+        ok: false,
+        error: `Prompt "${promptSlug}" could not be loaded (database): ${promptErr.message}`,
+        attempts: [],
+      };
+    }
+    logWarn("llm", "Prompt not found", { promptSlug });
     return { ok: false, error: `Prompt "${promptSlug}" not found.`, attempts: [] };
   }
   if (prompt.status !== "active") {
+    logWarn("llm", "Prompt is disabled — enable it in /admin/prompts", {
+      promptSlug,
+      status: prompt.status,
+    });
     return {
       ok: false,
       error: `Prompt "${promptSlug}" is disabled.`,
@@ -165,6 +188,7 @@ export async function llmCall(
     };
   }
   if (!prompt.current_version_id) {
+    logWarn("llm", "Prompt has no current version", { promptSlug });
     return {
       ok: false,
       error: `Prompt "${promptSlug}" has no current version.`,
@@ -173,13 +197,18 @@ export async function llmCall(
   }
 
   // 2. Load version body.
-  const { data: version } = await admin
+  const { data: version, error: versionErr } = await admin
     .from("prompt_versions")
     .select("body")
     .eq("id", prompt.current_version_id)
     .single();
 
   if (!version) {
+    logWarn("llm", "Prompt version row not found", {
+      promptSlug,
+      versionId: prompt.current_version_id,
+      dbError: versionErr?.message ?? null,
+    });
     return {
       ok: false,
       error: `Version for "${promptSlug}" not found.`,
@@ -188,7 +217,7 @@ export async function llmCall(
   }
 
   // 3. Load binding.
-  const { data: bindingRow } = await admin
+  const { data: bindingRow, error: bindingErr } = await admin
     .from("prompt_bindings")
     .select(
       "primary_model_slug, fallback_1_model_slug, fallback_2_model_slug, " +
@@ -198,6 +227,10 @@ export async function llmCall(
     .single();
 
   if (!bindingRow) {
+    logWarn("llm", "Prompt binding not found — no model bound", {
+      promptSlug,
+      dbError: bindingErr?.message ?? null,
+    });
     return {
       ok: false,
       error: `Binding for "${promptSlug}" not found.`,

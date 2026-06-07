@@ -21,8 +21,13 @@ export async function readSecret(key: string): Promise<string> {
     .eq("key", key)
     .single();
 
-  if (error || !data) {
-    throw new Error(`Secret "${key}" not found.`);
+  if (error) {
+    // A query error here is a DB / service-role problem, NOT a missing secret —
+    // surface it so the two are distinguishable in the log (PRD §14.9).
+    throw new Error(`Secret "${key}" lookup failed (database/service-role): ${error.message}`);
+  }
+  if (!data) {
+    throw new Error(`Secret "${key}" not found in system_secrets.`);
   }
 
   return decrypt(data.value_encrypted, serverEnv().secretEncryptionKey);
