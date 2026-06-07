@@ -86,6 +86,7 @@ export function MedDoseRow({
   canLog,
   minDots = 0,
   dotsOnly = false,
+  onOpenDiary,
 }: {
   meta: MedLogMeta | undefined;
   medColour: string;
@@ -102,6 +103,9 @@ export function MedDoseRow({
   // Render only the check-dots (no name/dose/status) — for the dashboard cards,
   // where the name and dose already appear in the card.
   dotsOnly?: boolean;
+  // When set, show a subtle diary glyph left of the dots that opens the day's
+  // Diary twisty (the agenda owns the scroll/open behavior).
+  onOpenDiary?: () => void;
 }) {
   const reduce = useReducedMotion() ?? false;
   const [, startTransition] = useTransition();
@@ -240,7 +244,33 @@ export function MedDoseRow({
         </span>
       </div>
 
-      <div className="ml-auto shrink-0">{dots}</div>
+      <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        {onOpenDiary ? (
+          <button
+            type="button"
+            onClick={onOpenDiary}
+            aria-label={`Open diary for ${medName}`}
+            title="Diary"
+            className="flex h-6 w-6 items-center justify-center rounded-full text-faint transition-colors hover:text-muted"
+          >
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+              <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z" />
+            </svg>
+          </button>
+        ) : null}
+        {dots}
+      </div>
     </div>
   );
 }

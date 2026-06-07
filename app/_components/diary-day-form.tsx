@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type Ref } from "react";
 import { usePathname } from "next/navigation";
 import { quickSaveDiaryField, saveDiaryNote } from "@/app/diary/actions";
 import { COMPLIANCE_COLOURS } from "@/lib/colours";
@@ -21,12 +21,15 @@ export function DiaryDayForm({
   entry,
   medNames,
   canLog,
+  detailsRef,
 }: {
   dayDate: string;
   fields: TrackedField[];
   entry: DiaryEntry | null;
   medNames: Record<string, string>;
   canLog: boolean;
+  // Lets the agenda open + scroll to this twisty from a med row's diary icon.
+  detailsRef?: Ref<HTMLDetailsElement>;
 }) {
   const path = usePathname() ?? "/dashboard";
   const [, startTransition] = useTransition();
@@ -201,7 +204,7 @@ export function DiaryDayForm({
   }
 
   return (
-    <details className="mt-3 rounded-md border border-line">
+    <details ref={detailsRef} className="mt-3 scroll-mt-4 rounded-md border border-line">
       <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2 text-sm font-medium text-paper">
         <span>Diary</span>
         <span className="text-xs text-faint">tap to open</span>
