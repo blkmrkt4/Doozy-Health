@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, type Ref } from "react";
+import { useState, useTransition } from "react";
 import { usePathname } from "next/navigation";
 import { quickSaveDiaryField, saveDiaryNote } from "@/app/diary/actions";
 import { COMPLIANCE_COLOURS } from "@/lib/colours";
@@ -21,15 +21,16 @@ export function DiaryDayForm({
   entry,
   medNames,
   canLog,
-  detailsRef,
+  hideNotes = false,
 }: {
   dayDate: string;
   fields: TrackedField[];
   entry: DiaryEntry | null;
   medNames: Record<string, string>;
   canLog: boolean;
-  // Lets the agenda open + scroll to this twisty from a med row's diary icon.
-  detailsRef?: Ref<HTMLDetailsElement>;
+  // Per-medication card context: hide the shared day-level Notes box (notes
+  // belong to the day, not a single medication).
+  hideNotes?: boolean;
 }) {
   const path = usePathname() ?? "/dashboard";
   const [, startTransition] = useTransition();
@@ -204,15 +205,34 @@ export function DiaryDayForm({
   }
 
   return (
-    <details ref={detailsRef} className="mt-3 scroll-mt-4 rounded-md border border-line">
+    <details className="mt-3 rounded-md border border-line">
       <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2 text-sm font-medium text-paper">
-        <span>Diary</span>
+        <span className="flex items-center gap-2">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+            className="text-faint"
+          >
+            <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+            <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z" />
+          </svg>
+          Diary
+        </span>
         <span className="text-xs text-faint">tap to open</span>
       </summary>
       <div className="space-y-4 border-t border-line p-4">
         {fields.length === 0 ? (
           <p className="text-xs text-faint">
-            No tracking fields yet. Add some in Settings → Tracking.
+            {hideNotes
+              ? "No tracking fields linked to this medication yet. Add some in Settings → Tracking."
+              : "No tracking fields yet. Add some in Settings → Tracking."}
           </p>
         ) : (
           fields.map((field) => {
@@ -230,18 +250,20 @@ export function DiaryDayForm({
           })
         )}
 
-        <div className="space-y-1">
-          <p className="text-sm text-muted">Notes</p>
-          <textarea
-            rows={2}
-            disabled={!canLog}
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            onBlur={commitNote}
-            placeholder="Anything else about today…"
-            className="block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent"
-          />
-        </div>
+        {hideNotes ? null : (
+          <div className="space-y-1">
+            <p className="text-sm text-muted">Notes</p>
+            <textarea
+              rows={2}
+              disabled={!canLog}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              onBlur={commitNote}
+              placeholder="Anything else about today…"
+              className="block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent"
+            />
+          </div>
+        )}
       </div>
     </details>
   );

@@ -659,8 +659,22 @@ export default async function DashboardPage({
                   </div>
                   {medWheel && medChart ? (
                     // Shared timeline: the wheel scrubs a read-out line on the
-                    // chart; the chart drops its own duplicate day strip.
-                    <MedTimeline wheelModel={medWheel} chart={medChart} />
+                    // chart and selects the day for this medication's own Diary
+                    // (its scoped tracked fields, PRD §5.9).
+                    <MedTimeline
+                      wheelModel={medWheel}
+                      chart={medChart}
+                      diaryFields={
+                        diaryFields.length
+                          ? diaryFields.filter((f) =>
+                              (f.medicationIds ?? []).includes(m.id)
+                            )
+                          : undefined
+                      }
+                      diaryEntriesByDay={diaryEntriesByDay}
+                      medNames={medNames}
+                      canLog={canLog}
+                    />
                   ) : medWheel ? (
                     <div className="mt-4">
                       <CalendarSection

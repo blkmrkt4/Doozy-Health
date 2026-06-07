@@ -1,6 +1,5 @@
 "use client";
 
-import { useRef } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { dayKey } from "@/lib/schedule";
 import { MedDoseRow } from "@/app/_components/med-dose-row";
@@ -31,16 +30,6 @@ export function DayAgenda({
   diaryEntriesByDay?: Map<string, DiaryEntry>;
 }) {
   const reduce = useReducedMotion();
-  const diaryRef = useRef<HTMLDetailsElement>(null);
-
-  // Open + reveal the day's Diary twisty when a med row's diary glyph is tapped.
-  const openDiary = () => {
-    const el = diaryRef.current;
-    if (!el) return;
-    el.open = true;
-    el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "nearest" });
-  };
-
   if (!day) return null;
 
   const fullDate = new Date(day.ms).toLocaleDateString("en-GB", {
@@ -94,7 +83,6 @@ export function DayAgenda({
                 dayMs={day.ms}
                 isToday={day.isToday}
                 canLog={canLog}
-                onOpenDiary={diaryFields ? openDiary : undefined}
               />
             </li>
           ))}
@@ -108,7 +96,6 @@ export function DayAgenda({
           entry={diaryEntriesByDay?.get(day.key) ?? null}
           medNames={medNames}
           canLog={canLog}
-          detailsRef={diaryRef}
         />
       ) : null}
     </motion.div>

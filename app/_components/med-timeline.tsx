@@ -3,23 +3,35 @@
 import { useState, type ComponentProps } from "react";
 import { DateWheel } from "@/app/_components/date-wheel";
 import { AmountInSystemChart } from "@/app/_components/amount-in-system-chart";
+import { DiaryDayForm } from "@/app/_components/diary-day-form";
 import type { WheelModel } from "@/lib/adherence";
+import type { TrackedField, DiaryEntry } from "@/lib/types";
 
-// Per-medication timeline (PRD §5.4 / §5.7): the draggable calendar wheel and
-// the amount-in-system chart sharing ONE date axis. The wheel is the single
-// scrubber — its centred date drives a movable read-out line on the chart
-// below, while the chart's Today line stays fixed. Dragging the wheel moves the
-// chart's line "the way you move the calendar"; resting on today shows just the
-// one line. This replaces the chart's own (duplicate, mis-scaled) day strip.
+// Per-medication timeline (PRD §5.4 / §5.7 / §5.9): the draggable calendar wheel
+// and the amount-in-system chart sharing ONE date axis, plus a per-medication
+// Diary twisty. The wheel is the single scrubber — its centred date drives the
+// chart's read-out line, and its selected day is what the diary edits, so the
+// diary lives at the individual-medication level (not the overall calendar).
+// Notes stay at the day level, so this med-scoped diary hides them.
 
 type ChartProps = Omit<ComponentProps<typeof AmountInSystemChart>, "cursorDate">;
 
 export function MedTimeline({
   wheelModel,
   chart,
+  diaryFields,
+  diaryEntriesByDay,
+  medNames,
+  canLog = false,
 }: {
   wheelModel: WheelModel;
   chart: ChartProps;
+  // This medication's scoped tracked fields. When provided, a per-card Diary
+  // twisty for the day selected on the wheel is shown.
+  diaryFields?: TrackedField[];
+  diaryEntriesByDay?: Map<string, DiaryEntry>;
+  medNames?: Record<string, string>;
+  canLog?: boolean;
 }) {
   const todayKey =
     wheelModel.days[wheelModel.todayIndex]?.key ?? wheelModel.days[0]?.key;
@@ -46,6 +58,16 @@ export function MedTimeline({
         onScrub={(ms) => setCursorMs(ms)}
       />
       <AmountInSystemChart {...chart} cursorDate={new Date(cursorMs)} />
+      {diaryFields ? (
+        <DiaryDayForm
+          dayDate={selectedKey}
+          fields={diaryFields}
+          entry={diaryEntriesByDay?.get(selectedKey) ?? null}
+          medNames={medNames ?? {}}
+          canLog={canLog}
+          hideNotes
+        />
+      ) : null}
     </div>
   );
 }
