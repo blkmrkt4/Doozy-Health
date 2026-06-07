@@ -66,27 +66,17 @@ export function ScanForm() {
     <section className="mt-6 rounded-md border border-line p-4 space-y-3">
       <h2 className="text-sm font-medium text-paper">Scan a photo</h2>
       <p className="text-xs text-faint">
-        Take a photo of a vial, package, or prescription and we will extract
-        the details for you to review.
+        Take a photo of a vial, package, or prescription — we&rsquo;ll detect
+        which it is and extract the details for you to review.
       </p>
 
       {isPending ? (
         <ExtractingIndicator />
       ) : (
         <form ref={formRef} action={uploadAndExtract} className="space-y-3">
-          <div className="flex gap-3">
-            <label className="block text-sm text-muted">
-              Type
-              <select
-                name="document_type"
-                defaultValue="vial_photo"
-                className="mt-1 block rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent"
-              >
-                <option value="vial_photo">Vial / package</option>
-                <option value="prescription_scan">Prescription</option>
-              </select>
-            </label>
-          </div>
+          {/* No type picker: the extractor reads the photo, defaults to a vial,
+              and transparently switches to the prescription reader (and back)
+              when the photo is actually the other kind (see uploadAndExtract). */}
 
           {/* File input styled via the label — choosing a photo starts
               extraction immediately, so this is the only control needed. */}
