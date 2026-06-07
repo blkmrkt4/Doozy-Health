@@ -39,6 +39,7 @@ type AmountChartProps = {
   prescribed: PrescribedRegimen;
   identityColor?: string;
   nowDays: number;
+  nowDate: Date;
 };
 
 type ChosenRow = {
@@ -387,6 +388,13 @@ export default async function DashboardPage({
           : undefined,
         isLinear: params.isLinear,
         model: "amount_in_system",
+        // Route-aware shape (Fix 1): the chart picks an instant / first-order /
+        // zero-order kernel from the route, sharpened by Tmax and (for patches)
+        // the release window when the drug record carries them.
+        tmaxDays: params.tmaxHours ? params.tmaxHours / 24 : undefined,
+        releaseDurationDays: params.releaseDurationHours
+          ? params.releaseDurationHours / 24
+          : undefined,
         provenance: "curated",
       };
 
@@ -405,6 +413,7 @@ export default async function DashboardPage({
         prescribed,
         identityColor: m.colour ?? undefined,
         nowDays: dayOf(nowMs),
+        nowDate: new Date(nowMs),
       });
     }
   }
@@ -665,6 +674,7 @@ export default async function DashboardPage({
                         prescribed={medChart.prescribed}
                         identityColor={medChart.identityColor}
                         nowDays={medChart.nowDays}
+                        nowDate={medChart.nowDate}
                       />
                     </div>
                   ) : null}

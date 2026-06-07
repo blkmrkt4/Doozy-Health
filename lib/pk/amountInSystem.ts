@@ -106,20 +106,27 @@ export function makeAmountFn(
 }
 
 /**
- * Sample the curve every 0.2 days, plus two points per taken dose
- * (t−ε excludes the dose, t includes it) to draw crisp vertical jumps.
+ * Sample the curve every 0.2 days. For a fast (instant-add) route we also
+ * insert two points per taken dose (t−ε excludes the dose, t includes it) so
+ * the jump draws crisp. For a slow-release route the dose rises smoothly over
+ * ~Tmax, so the ε points are suppressed (`crispJumps: false`) and the sampler
+ * leans on its 0.2-day grid to trace the rounded wave (Fix 1).
  */
 export function sampleSeries(
   amountFn: (t: number) => number,
   doses: DoseEvent[],
-  days: number
+  days: number,
+  opts?: { crispJumps?: boolean }
 ): SamplePoint[] {
+  const crispJumps = opts?.crispJumps ?? true;
   const ts = new Set<number>();
   for (let t = 0; t <= days + 1e-9; t += 0.2) ts.add(+t.toFixed(2));
-  for (const e of doses) {
-    if (e.taken) {
-      ts.add(e.t - 1e-4);
-      ts.add(e.t);
+  if (crispJumps) {
+    for (const e of doses) {
+      if (e.taken) {
+        ts.add(e.t - 1e-4);
+        ts.add(e.t);
+      }
     }
   }
   return [...ts].sort((a, b) => a - b).map((t) => ({ t, v: amountFn(t) }));
@@ -170,6 +177,170 @@ export function steadyState(
 /** fractionToSteady(t) ≈ 1 − e^(−k·t): ~94% at 4 half-lives, ~97% at 5. */
 export function fractionToSteady(halfLifeDays: number, t: number): number {
   return 1 - Math.exp(-(Math.LN2 / halfLifeDays) * t);
+}
+
+// ── 4.2 Route-aware dose kernel (Fix 1) ──────────────────────────────────────
+//
+// The DEFAULT amount-in-system view adds each dose instantly. That is only
+// physically reasonable for FAST routes (oral immediate-release, IV, aqueous SC
+// bolus). For SLOW-RELEASE routes (IM oil depot esters, depot SC, transdermal
+// patches/implants) the dose is NOT on board instantly — it rises to a peak
+// over ~Tmax (about a day or two), then declines. So the kernel is chosen from
+// the route, not a global default: depot esters use a first-order (Bateman)
+// absorption rise; patches/implants use a zero-order release plateau. Each
+// kernel is normalised to a UNIT PEAK so a dose's peak contribution ≈ its
+// amount in the drug's native unit (the reference's convention) — what changes
+// per route is the SHAPE of the rise, not the scale. For depot esters
+// absorption is rate-limiting (flip-flop kinetics): the rise spans ~Tmax and
+// the slow terminal decline reflects that release.
+
+/** How a single dose enters the system: a sharp add, a rounded rise, or a plateau. */
+export type CurveShape = "instant" | "first_order" | "zero_order";
+
+/** Absorption half-life used when no Tmax is supplied (≈ the reference's 2.7-day Tmax). */
+const DEFAULT_ABSORPTION_HALF_LIFE_DAYS = 0.7;
+
+/** Pick the curve shape from the model/route. Depot IM and transdermal are slow-release. */
+export function curveShape(drug: DrugPK): CurveShape {
+  if (drug.model === "zero_order") return "zero_order";
+  if (drug.model === "serum_bateman") return "first_order";
+  // Default amount_in_system: the route decides.
+  switch (drug.route) {
+    case "transdermal":
+      return drug.releaseDurationDays ? "zero_order" : "first_order";
+    case "intramuscular":
+      return "first_order"; // oil depot ester → rounded wave, never a spike
+    default:
+      // oral / sublingual / IV / inhaled / SC aqueous bolus / suppository / topical
+      return "instant";
+  }
+}
+
+/** Instant bolus: full dose on board immediately, then first-order decay. */
+function instantKernel(halfLifeDays: number): (dt: number) => number {
+  const ke = Math.LN2 / halfLifeDays;
+  return (dt) => (dt < 0 ? 0 : Math.exp(-ke * dt));
+}
+
+/**
+ * First-order absorption (Bateman), normalised to a unit peak. Rises over ~Tmax
+ * then declines on the terminal half-life. Ka is derived from Tmax when given,
+ * else from a short default absorption half-life.
+ */
+function firstOrderKernel(
+  halfLifeDays: number,
+  tmaxDays?: number
+): (dt: number) => number {
+  const ke = Math.LN2 / halfLifeDays;
+  let ka: number;
+  if (tmaxDays && tmaxDays > 0) {
+    const ratio = Math.min(tmaxDays / halfLifeDays, 0.99);
+    ka = Math.LN2 / (tmaxDays * (1 - ratio));
+  } else {
+    ka = Math.LN2 / DEFAULT_ABSORPTION_HALF_LIFE_DAYS;
+  }
+  if (ka <= ke) ka = ke * 1.5; // guarantee absorption-then-elimination
+  const tp = Math.log(ka / ke) / (ka - ke);
+  const peak = Math.exp(-ke * tp) - Math.exp(-ka * tp);
+  return (dt) =>
+    dt < 0 ? 0 : (Math.exp(-ke * dt) - Math.exp(-ka * dt)) / peak;
+}
+
+/**
+ * Zero-order release over `releaseDays`, then first-order decay — normalised so
+ * the level at end-of-release (the peak) is 1. Roughly flat while applied, then
+ * decays after removal: a transdermal patch / implant.
+ */
+function zeroOrderKernel(
+  halfLifeDays: number,
+  releaseDays: number
+): (dt: number) => number {
+  const ke = Math.LN2 / halfLifeDays;
+  const rate = 1 / releaseDays; // unit dose released over the window
+  const apeak = (rate / ke) * (1 - Math.exp(-ke * releaseDays));
+  return (dt) => {
+    if (dt < 0) return 0;
+    if (dt <= releaseDays) return ((rate / ke) * (1 - Math.exp(-ke * dt))) / apeak;
+    return Math.exp(-ke * (dt - releaseDays));
+  };
+}
+
+/** The unit-dose contribution at `dt` days after a dose, for this drug's route. */
+export function doseKernel(drug: DrugPK): (dt: number) => number {
+  switch (curveShape(drug)) {
+    case "zero_order":
+      return zeroOrderKernel(
+        drug.halfLifeDays,
+        drug.releaseDurationDays ?? drug.tmaxDays ?? 1
+      );
+    case "first_order":
+      return firstOrderKernel(drug.halfLifeDays, drug.tmaxDays);
+    default:
+      return instantKernel(drug.halfLifeDays);
+  }
+}
+
+/**
+ * Route-aware amount(t): Σ doseᵢ.amount · kern(t − doseᵢ.t) over taken doses
+ * with t ≤ now. Same superposition as {@link makeAmountFn}, but the per-dose
+ * kernel follows the route so a depot dose rises to a peak instead of jumping.
+ */
+export function makeAmountFnForDrug(
+  drug: DrugPK,
+  doses: DoseEvent[]
+): (t: number) => number {
+  const kern = doseKernel(drug);
+  return (t) =>
+    doses.reduce((s, e) => (e.taken && e.t <= t ? s + e.amount * kern(t - e.t) : s), 0);
+}
+
+// ── 4.2b Accumulation regime (Fix 2) ─────────────────────────────────────────
+//
+// Whether the "builds to a steady plateau" story is true depends on the dosing
+// interval relative to the half-life. The accumulation ratio
+//   R = 1 / (1 − e^(−k·τ))            τ = interval in days, k = ln2 / halfLife
+// is how much the level settles to, relative to a single dose's peak. R ≳ 1.3
+// means doses stack into a steady range; R near 1 means each dose largely
+// clears before the next — a roller-coaster, no plateau.
+
+export type Regime = "accumulates" | "intermediate" | "clears";
+
+/** R = 1 / (1 − e^(−k·τ)). */
+export function accumulationRatio(halfLifeDays: number, intervalDays: number): number {
+  const k = Math.LN2 / halfLifeDays;
+  return 1 / (1 - Math.exp(-k * intervalDays));
+}
+
+/** Map R to a narrative regime: clears (<1.3), intermediate (<2), accumulates (≥2). */
+export function regimeOf(R: number): Regime {
+  if (R < 1.3) return "clears";
+  if (R < 2) return "intermediate";
+  return "accumulates";
+}
+
+/**
+ * Derive a reference band straight from the drawn curve over [fromT, toT] — so
+ * the band always lines up with the curve regardless of the route's kernel
+ * (the closed-form {@link steadyState} only matches the instant-bolus shape).
+ */
+export function bandFromSeries(
+  series: SamplePoint[],
+  fromT: number,
+  toT: number
+): { trough: number; peak: number; avg: number } | null {
+  let mn = Infinity;
+  let mx = 0;
+  let sum = 0;
+  let n = 0;
+  for (const p of series) {
+    if (p.t >= fromT && p.t <= toT) {
+      mn = Math.min(mn, p.v);
+      mx = Math.max(mx, p.v);
+      sum += p.v;
+      n += 1;
+    }
+  }
+  return n ? { trough: mn, peak: mx, avg: sum / n } : null;
 }
 
 // ── 4.5 Time axis — pick unit + window automatically ─────────────────────────
