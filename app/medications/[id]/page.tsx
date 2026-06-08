@@ -53,6 +53,8 @@ import {
 } from "@/lib/documents";
 import { LogDoseForm } from "./log-dose-form";
 import { SyringeVisual } from "@/app/medications/_components/syringe-visual";
+import { buildSetupChecklist, setupComplete } from "@/lib/medication-setup";
+import { SetupChecklist } from "@/app/medications/[id]/_components/setup-checklist";
 
 type Regimen = {
   dose_amount: string;
@@ -105,6 +107,7 @@ type Medication = {
   entry_source: string;
   archived: boolean;
   syringe_id: string | null;
+  accessories: unknown;
   prescribed_regimens: Regimen[] | null;
   delivery_forms: DeliveryForm[] | null;
   chosen_regimens: Regimen[] | null;
@@ -144,7 +147,7 @@ export default async function MedicationDetailPage({
   const { data } = await supabase
     .from("medications")
     .select(
-      "id, patient_id, display_name, canonical_drug_id, is_private, entry_source, archived, colour, syringe_id, prescribed_regimens(*), delivery_forms(*), chosen_regimens(*)"
+      "id, patient_id, display_name, canonical_drug_id, is_private, entry_source, archived, colour, syringe_id, accessories, prescribed_regimens(*), delivery_forms(*), chosen_regimens(*)"
     )
     .eq("id", id)
     .maybeSingle();
@@ -394,6 +397,41 @@ export default async function MedicationDetailPage({
     }
   }
 
+  // Setup checklist (PRD §5.1–5.3): what this medication references and what's
+  // still missing. Data-bearing items computed from rows above; the syringe
+  // picker is fed from the patient's inventory.
+  const { data: syringeRows } = await supabase
+    .from("inventory_items")
+    .select("id, label")
+    .eq("patient_id", med.patient_id)
+    .eq("category", "syringe")
+    .eq("archived", false)
+    .order("created_at", { ascending: false });
+  const syringes = (syringeRows ?? []) as { id: string; label: string }[];
+  const hasPrescriptionDoc = docs.some(
+    (d) => d.document_type === "prescription_scan"
+  );
+  const accessories = (Array.isArray(med.accessories) ? med.accessories : [])
+    .map((a) => {
+      const r = (a ?? {}) as Record<string, unknown>;
+      const type = String(r.type ?? "");
+      return {
+        type,
+        label: String(r.label ?? type),
+        source: r.source as "prescription" | "label" | "inferred" | undefined,
+        acknowledged: r.acknowledged === true,
+      };
+    })
+    .filter((a) => a.type);
+  const setupItems = buildSetupChecklist({
+    delivery,
+    prescribed,
+    chosen,
+    resolvedSyringeCapacityMl: resolvedCapacityMl,
+    hasPrescriptionDoc,
+    accessories,
+  });
+
   return (
     <div className="min-h-full">
       <header className="border-b border-line">
@@ -433,6 +471,19 @@ export default async function MedicationDetailPage({
             </p>
           ) : null}
         </div>
+
+        {/* Setup checklist (PRD §5.1–5.3). Prominent right after adding (?new=1);
+            otherwise shown only while something's still missing. */}
+        {setupItems.length > 0 && (isNew || !setupComplete(setupItems)) ? (
+          <SetupChecklist
+            medicationId={med.id}
+            items={setupItems}
+            syringes={syringes}
+            currentSyringeId={med.syringe_id}
+            isOwner={isOwner}
+            prominent={Boolean(isNew)}
+          />
+        ) : null}
 
         {/* Inline modelled-level chart (PRD §5.7). Illustrative, labelled. */}
         {pkSeries ? (

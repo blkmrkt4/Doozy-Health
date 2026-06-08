@@ -37,6 +37,7 @@ import {
   type VialExtraction,
   type PrescriptionExtraction,
 } from "@/lib/extraction";
+import { accessoriesFromRequiredComponents } from "@/lib/medication-setup";
 import { generateReminders } from "@/lib/reminders";
 import { explainInteraction } from "@/lib/interactions";
 import { nextMedColour } from "@/lib/colours";
@@ -431,6 +432,64 @@ export async function setMedicationPrivacy(formData: FormData) {
   }
   revalidatePath(`/medications/${id}`);
   revalidatePath("/dashboard");
+  redirect(`/medications/${id}`);
+}
+
+/**
+ * Set (or clear) the syringe this medication is drawn with — the one gap the
+ * setup checklist needs that the monolithic edit form otherwise owned. Owner-only
+ * via RLS (a non-owner update matches 0 rows). Drives the calibrated syringe
+ * visual + the checklist's "syringe" item (PRD §5.1).
+ */
+export async function setMedicationSyringe(formData: FormData) {
+  const supabase = await createClient();
+  const id = str(formData, "medication_id");
+  const syringeId = str(formData, "syringe_id") || null;
+
+  const { error } = await supabase
+    .from("medications")
+    .update({ syringe_id: syringeId })
+    .eq("id", id);
+
+  if (error) {
+    redirect(`/medications/${id}?error=${encodeURIComponent(error.message)}`);
+  }
+  revalidatePath(`/medications/${id}`);
+  redirect(`/medications/${id}`);
+}
+
+/**
+ * Flip the "acknowledged" flag on one awareness accessory (spacer, oral syringe…)
+ * in medications.accessories. Owner-only via RLS. Never blocks anything — it just
+ * records that the user has the supply (PRD §5.1–5.3).
+ */
+export async function toggleAccessoryAcknowledged(formData: FormData) {
+  const supabase = await createClient();
+  const id = str(formData, "medication_id");
+  const type = str(formData, "accessory_type");
+
+  const { data: med } = await supabase
+    .from("medications")
+    .select("accessories")
+    .eq("id", id)
+    .maybeSingle();
+
+  const list = Array.isArray(med?.accessories)
+    ? (med!.accessories as Array<Record<string, unknown>>)
+    : [];
+  const next = list.map((a) =>
+    a.type === type ? { ...a, acknowledged: a.acknowledged !== true } : a
+  );
+
+  const { error } = await supabase
+    .from("medications")
+    .update({ accessories: next })
+    .eq("id", id);
+
+  if (error) {
+    redirect(`/medications/${id}?error=${encodeURIComponent(error.message)}`);
+  }
+  revalidatePath(`/medications/${id}`);
   redirect(`/medications/${id}`);
 }
 
@@ -1138,6 +1197,20 @@ export async function confirmPhotoExtraction(formData: FormData) {
     .update({ linked_medication_id: medId })
     .eq("id", docId);
 
+  // Seed the setup checklist's awareness accessories the model inferred from the
+  // vial (e.g. a spacer, an oral syringe). Data-bearing components are covered by
+  // the checklist's rules, so they're filtered out here.
+  const vialAccessories = accessoriesFromRequiredComponents(
+    extraction.required_components ?? [],
+    "label"
+  );
+  if (vialAccessories.length > 0) {
+    await admin
+      .from("medications")
+      .update({ accessories: vialAccessories })
+      .eq("id", medId);
+  }
+
   // Gather user-confirmed values for delta comparison.
   const userValues: Record<string, string> = {
     drug_name_raw: displayName,
@@ -1270,6 +1343,19 @@ export async function confirmPrescriptionExtraction(formData: FormData) {
     .from("documents")
     .update({ linked_medication_id: medId })
     .eq("id", docId);
+
+  // Seed awareness accessories the model inferred from the prescription (a
+  // spacer, an oral syringe…). Data-bearing components are covered by rules.
+  const rxAccessories = accessoriesFromRequiredComponents(
+    extraction.required_components ?? [],
+    "prescription"
+  );
+  if (rxAccessories.length > 0) {
+    await admin
+      .from("medications")
+      .update({ accessories: rxAccessories })
+      .eq("id", medId);
+  }
 
   // Write extraction deltas.
   const userValues: Record<string, string> = {

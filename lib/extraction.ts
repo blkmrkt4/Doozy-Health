@@ -16,6 +16,19 @@ export type ExtractedField<T = string> = {
   confidence: LlmConfidence;
 };
 
+/**
+ * A supply this medication needs that the document may not spell out — the model
+ * infers it from the drug + form (a powder ⇒ diluent + syringe; an inhaler ⇒
+ * often a spacer). `inferred` distinguishes drug-knowledge from text printed on
+ * the document, which drives the §6.1-safe copy ("often used with" vs "your
+ * prescription references"). Seeds the setup checklist.
+ */
+export type RequiredComponent = {
+  type: string;
+  inferred: boolean;
+  confidence: LlmConfidence;
+};
+
 export type VialExtraction = {
   drug_name_raw: ExtractedField;
   drug_name_canonical: ExtractedField;
@@ -31,6 +44,7 @@ export type VialExtraction = {
   requires_reconstitution: ExtractedField;
   diluent_type: ExtractedField;
   reconstitution_note: ExtractedField;
+  required_components: RequiredComponent[];
   route: ExtractedField;
   // Free-text dosing instructions printed on a dispensed label, e.g.
   // "Take 1 tablet by mouth every morning". Empty for bare manufacturer vials.
@@ -54,6 +68,7 @@ export type PrescriptionExtraction = {
   diluent_volume_ml: ExtractedField<number | null>;
   diluent_type: ExtractedField;
   reconstitution_note: ExtractedField;
+  required_components: RequiredComponent[];
 };
 
 export type ExtractionType = "vial" | "prescription";
@@ -125,6 +140,27 @@ function parseNumberField(
   return { value: Number.isFinite(n) ? n : null, confidence: "low" };
 }
 
+/** Parse the `required_components` array defensively → [] on missing/garbage. */
+function parseRequiredComponents(
+  obj: Record<string, unknown>
+): RequiredComponent[] {
+  const raw = obj["required_components"];
+  if (!Array.isArray(raw)) return [];
+  const out: RequiredComponent[] = [];
+  for (const e of raw) {
+    if (!e || typeof e !== "object") continue;
+    const r = e as Record<string, unknown>;
+    const type = String(r.type ?? "").trim().toLowerCase();
+    if (!type) continue;
+    out.push({
+      type,
+      inferred: r.inferred === true,
+      confidence: parseConfidence(r.confidence),
+    });
+  }
+  return out;
+}
+
 /**
  * Extract the first JSON object from an LLM response, tolerating markdown
  * code fences and surrounding text (PRD §14.6 — caller parses defensively).
@@ -175,6 +211,7 @@ export function parseVialExtraction(raw: string): VialExtraction | null {
     requires_reconstitution: parseStringField(obj, "requires_reconstitution"),
     diluent_type: parseStringField(obj, "diluent_type"),
     reconstitution_note: parseStringField(obj, "reconstitution_note"),
+    required_components: parseRequiredComponents(obj),
     route: parseStringField(obj, "route"),
     directions: parseStringField(obj, "directions"),
     expiry_date: parseStringField(obj, "expiry_date"),
@@ -201,6 +238,7 @@ export function parsePrescriptionExtraction(
     diluent_volume_ml: parseNumberField(obj, "diluent_volume_ml"),
     diluent_type: parseStringField(obj, "diluent_type"),
     reconstitution_note: parseStringField(obj, "reconstitution_note"),
+    required_components: parseRequiredComponents(obj),
   };
 }
 
@@ -511,7 +549,9 @@ export async function normaliseDrugName(
 export async function writeExtractionDeltas(opts: {
   documentId: string | null;
   drugCanonicalName: string;
-  extraction: Record<string, ExtractedField<unknown>>;
+  // Accepts a whole VialExtraction / PrescriptionExtraction; non-{value,confidence}
+  // members (e.g. required_components[]) are skipped by the guard below.
+  extraction: Record<string, unknown>;
   userValues: Record<string, string>;
   direction: "llm_to_user" | "user_to_llm";
   promptSlug: string;
@@ -521,7 +561,13 @@ export async function writeExtractionDeltas(opts: {
   const admin = createAdminClient();
 
   const rows = [];
-  for (const [key, field] of Object.entries(opts.extraction)) {
+  for (const [key, raw] of Object.entries(opts.extraction)) {
+    // Skip non-{value,confidence} fields (e.g. the required_components array),
+    // which aren't per-field deltas (hard rule #10 stays — no identifiers).
+    if (!raw || typeof raw !== "object" || Array.isArray(raw) || !("value" in raw)) {
+      continue;
+    }
+    const field = raw as ExtractedField<unknown>;
     const llmValue = String(field.value ?? "");
     const userValue = opts.userValues[key] ?? "";
 

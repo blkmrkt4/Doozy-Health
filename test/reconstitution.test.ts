@@ -83,4 +83,28 @@ describe("reconstitution extraction parsing", () => {
     expect(rx!.diluent_volume_ml.value).toBe(3);
     expect(rx!.diluent_type.value).toBe("bacteriostatic water");
   });
+
+  it("parses required_components (array, mixed inferred); tolerates absence", () => {
+    const withComps = parseVialExtraction(
+      JSON.stringify({
+        drug_name_raw: { value: "Ventolin", confidence: "high" },
+        required_components: [
+          { type: "spacer", inferred: true, confidence: "medium" },
+          { type: "face_mask", inferred: false, confidence: "high" },
+          { junk: true }, // garbage entry → skipped
+        ],
+      })
+    );
+    expect(withComps!.required_components.map((c) => c.type)).toEqual([
+      "spacer",
+      "face_mask",
+    ]);
+    expect(withComps!.required_components[0].inferred).toBe(true);
+
+    // Old extractions (no key) parse to an empty array, never throw.
+    const without = parseVialExtraction(
+      JSON.stringify({ drug_name_raw: { value: "Aspirin", confidence: "high" } })
+    );
+    expect(without!.required_components).toEqual([]);
+  });
 });
