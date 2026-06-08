@@ -81,10 +81,10 @@ export function ScanForm() {
 
   return (
     <section className="mt-6 rounded-md border border-line p-4 space-y-3">
-      <h2 className="text-sm font-medium text-paper">Scan a photo</h2>
+      <h2 className="text-sm font-medium text-paper">Scan photos</h2>
       <p className="text-xs text-faint">
-        Take a photo of a vial, package, or prescription — we&rsquo;ll detect
-        which it is and extract the details for you to review.
+        Add one or more photos of a vial, package, or prescription — we&rsquo;ll
+        detect what it is and pull out the details for you to review.
       </p>
 
       {isPending ? (
@@ -163,12 +163,13 @@ export function ScanForm() {
             </button>
           </div>
 
-          {/* Multi-photo guidance — for curved vials / bottles whose label
-              wraps out of one frame. */}
+          {/* Multi-photo guidance — same item from several angles, or a
+              powder vial paired with its diluent vial, read together. */}
           <p className="text-xs text-faint">
-            On a curved vial or bottle the label often won&rsquo;t fit in one
-            shot. Add a few photos of the different sides
-            {full ? " (max 5)" : ""} — we&rsquo;ll read them together.
+            You can add several photos{full ? " (max 5)" : ""} and we&rsquo;ll
+            read them together — for example, the different sides of a curved
+            label that won&rsquo;t fit in one shot, or a powder vial plus its
+            bacteriostatic-water vial. A prescription is best scanned on its own.
           </p>
 
           {files.length > 0 ? (
