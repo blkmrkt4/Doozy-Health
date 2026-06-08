@@ -128,7 +128,7 @@ describe.skipIf(!STACK_READY)("llmCall integration", () => {
         inputTokens: 10,
         outputTokens: 20,
       });
-    vi.spyOn(secretsModule, "readSecret").mockResolvedValue(
+    vi.spyOn(secretsModule, "getOpenRouterApiKey").mockResolvedValue(
       "sk-or-v1-fake-test-key"
     );
 
@@ -168,7 +168,7 @@ describe.skipIf(!STACK_READY)("llmCall integration", () => {
         inputTokens: 15,
         outputTokens: 25,
       });
-    vi.spyOn(secretsModule, "readSecret").mockResolvedValue("fake-key");
+    vi.spyOn(secretsModule, "getOpenRouterApiKey").mockResolvedValue("fake-key");
 
     const result = await llmModule.llmCall(TEST_SLUG, {
       name: "Bob",
@@ -194,7 +194,7 @@ describe.skipIf(!STACK_READY)("llmCall integration", () => {
       .mockRejectedValueOnce(new Error("Primary fail"))
       .mockRejectedValueOnce(new Error("Fallback 1 fail"))
       .mockRejectedValueOnce(new Error("Fallback 2 fail"));
-    vi.spyOn(secretsModule, "readSecret").mockResolvedValue("fake-key");
+    vi.spyOn(secretsModule, "getOpenRouterApiKey").mockResolvedValue("fake-key");
 
     const result = await llmModule.llmCall(TEST_SLUG, {
       name: "X",
@@ -256,7 +256,7 @@ describe.skipIf(!STACK_READY)("llmCall integration", () => {
         inputTokens: 50,
         outputTokens: 10,
       });
-    vi.spyOn(secretsModule, "readSecret").mockResolvedValue("fake-key");
+    vi.spyOn(secretsModule, "getOpenRouterApiKey").mockResolvedValue("fake-key");
 
     const fakeImage = "data:image/jpeg;base64,/9j/4AAQ...";
     const result = await llmModule.llmCall(
@@ -302,7 +302,7 @@ describe.skipIf(!STACK_READY)("llmCall integration", () => {
         inputTokens: 5,
         outputTokens: 10,
       });
-    vi.spyOn(secretsModule, "readSecret").mockResolvedValue("fake-key");
+    vi.spyOn(secretsModule, "getOpenRouterApiKey").mockResolvedValue("fake-key");
 
     await llmModule.llmCall(TEST_SLUG, { name: "Log", topic: "test" });
 

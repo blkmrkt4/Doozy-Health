@@ -12,6 +12,28 @@ function mask(value: string): string {
   return `${value.slice(0, 6)}...${value.slice(-4)}`;
 }
 
+/**
+ * Resolve the OpenRouter API key. For a hosted deployment (e.g. Vercel) the key
+ * is set as an environment variable — the durable source of truth that survives
+ * every deploy and needs no encrypt/decrypt round-trip. The encrypted
+ * `system_secrets` row (the /admin field) remains a fallback for setups that
+ * prefer DB-managed secrets. Env wins so a stale or undecryptable DB row can
+ * never strand the app (PRD §14.3; relaxes CLAUDE.md rule #4 for THIS key only).
+ *
+ * Accepts OPENROUTER_API_KEY (preferred), OPEN_ROUTER, or the local bootstrap
+ * OPENROUTER_BOOTSTRAP_KEY, in that order.
+ */
+export async function getOpenRouterApiKey(): Promise<string> {
+  const fromEnv = (
+    process.env.OPENROUTER_API_KEY ||
+    process.env.OPEN_ROUTER ||
+    process.env.OPENROUTER_BOOTSTRAP_KEY ||
+    ""
+  ).trim();
+  if (fromEnv) return fromEnv;
+  return readSecret("openrouter_api_key");
+}
+
 /** Read and decrypt a system secret by key. Throws if not found. */
 export async function readSecret(key: string): Promise<string> {
   const admin = createAdminClient();

@@ -98,18 +98,38 @@ async function main() {
     );
   console.log();
 
-  // 2. OpenRouter key read + decrypt.
-  console.log("2) OpenRouter API key (read + decrypt from system_secrets):");
+  // 2. OpenRouter key — env var first (the hosted source of truth), then the
+  //    encrypted system_secrets row as a fallback.
+  console.log("2) OpenRouter API key (env var first, then system_secrets):");
   let keyOk = false;
-  try {
-    const key = await readSecret("openrouter_api_key");
+  const envKey = (
+    process.env.OPENROUTER_API_KEY ||
+    process.env.OPEN_ROUTER ||
+    process.env.OPENROUTER_BOOTSTRAP_KEY ||
+    ""
+  ).trim();
+  if (envKey) {
     keyOk = true;
+    const which = process.env.OPENROUTER_API_KEY
+      ? "OPENROUTER_API_KEY"
+      : process.env.OPEN_ROUTER
+        ? "OPEN_ROUTER"
+        : "OPENROUTER_BOOTSTRAP_KEY";
     line(
       true,
-      `decrypted OK: ${mask(key)} ${key.startsWith("sk-or-") ? "(OpenRouter prefix ✓)" : "(unexpected prefix — not sk-or-…!)"}`
+      `from ENV (${which}): ${mask(envKey)} ${envKey.startsWith("sk-or-") ? "(OpenRouter prefix ✓)" : "(unexpected prefix — not sk-or-…!)"}`
     );
-  } catch (e) {
-    line(false, e instanceof Error ? e.message : String(e));
+  } else {
+    try {
+      const key = await readSecret("openrouter_api_key");
+      keyOk = true;
+      line(
+        true,
+        `no env var; from system_secrets (decrypted): ${mask(key)} ${key.startsWith("sk-or-") ? "(OpenRouter prefix ✓)" : "(unexpected prefix!)"}`
+      );
+    } catch (e) {
+      line(false, `no env var, and ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
   console.log();
 

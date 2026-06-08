@@ -1,5 +1,5 @@
 import "server-only";
-import { readSecret } from "@/lib/secrets";
+import { getOpenRouterApiKey } from "@/lib/secrets";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logError, logWarn } from "@/lib/log";
 import {
@@ -244,17 +244,17 @@ export async function llmCall(
   const rendered = renderTemplate(version.body, vars);
   const messages = buildMessages(rendered, opts);
 
-  // 5. Read the OpenRouter API key.
+  // 5. Read the OpenRouter API key (env var first, then system_secrets).
   let apiKey: string;
   try {
-    apiKey = await readSecret("openrouter_api_key");
+    apiKey = await getOpenRouterApiKey();
   } catch (err) {
-    // The single most common silent failure: no key in system_secrets. Make it
-    // loud in the server log (slug only — never the vars/images, which carry
-    // health data) so it is diagnosable instead of a blank screen.
-    logError("llm", "OpenRouter API key not configured in system_secrets", err, {
+    // A common silent failure: no key anywhere. Make it loud in the server log
+    // (slug only — never the vars/images, which carry health data) so it is
+    // diagnosable instead of a blank screen.
+    logError("llm", "OpenRouter API key not configured", err, {
       promptSlug,
-      hint: "seed it via: OPENROUTER_BOOTSTRAP_KEY=... npm run seed:key",
+      hint: "set OPENROUTER_API_KEY in the host env (e.g. Vercel), or add it in /admin/settings",
     });
     return {
       ok: false,
