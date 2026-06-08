@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   DOSE_UNITS,
+  DILUENTS,
   FORM_TYPES,
   FORM_TYPE_LABELS,
   FREQUENCY_UNITS,
@@ -56,6 +57,11 @@ type Concentration = {
   unitConfidence: LlmConfidence;
   perVolumeConfidence: LlmConfidence;
   volumeConfidence: LlmConfidence;
+  // Reconstitution (powder + diluent): when true the concentration fields are
+  // relabelled — amount = active in the vial, per-volume = the diluent volume
+  // the prescription says to add.
+  requiresReconstitution?: boolean;
+  diluentType?: string;
 };
 
 /**
@@ -277,12 +283,22 @@ function InjectableFields({
   defaultDoseUnit: string;
   scheduleSummary: string | null;
 }) {
-  const [cAmount, setCAmount] = useState(
-    concentration.amount != null ? String(concentration.amount) : ""
+  const [isRecon, setIsRecon] = useState(
+    concentration.requiresReconstitution ?? false
   );
-  const [cUnit, setCUnit] = useState(concentration.unit || "mg");
+  const [diluent, setDiluent] = useState(
+    concentration.diluentType || "bacteriostatic water"
+  );
+  const [cAmount, setCAmount] = useState(
+    concentration.amount ? String(concentration.amount) : ""
+  );
+  const [cUnit, setCUnit] = useState(
+    concentration.unit || (concentration.requiresReconstitution ? "IU" : "mg")
+  );
+  // 0 (e.g. a powder's unknown per-volume before mixing) starts empty so the
+  // user fills in the mix volume from their prescription.
   const [cPer, setCPer] = useState(
-    concentration.perVolume != null ? String(concentration.perVolume) : ""
+    concentration.perVolume ? String(concentration.perVolume) : ""
   );
   const [dose, setDose] = useState("");
   const [doseUnit, setDoseUnit] = useState(
@@ -314,16 +330,42 @@ function InjectableFields({
   return (
     <>
       <fieldset className="space-y-4 rounded-md border border-line p-4">
-        <legend className="text-sm font-medium text-paper">
-          Concentration (from the vial)
-        </legend>
-        <p className="text-xs text-faint">
-          How strong the liquid is — e.g. 200 mg in every 1 mL. This is the
-          vial&rsquo;s label, not your dose. We use it to work out the syringe
-          volume below.
-        </p>
+        <legend className="text-sm font-medium text-paper">Concentration</legend>
+
+        {/* Reconstitution: a powder's strength depends on how much liquid you
+            add, so we relabel the fields and compute the result. */}
+        <label className="flex items-start gap-2 text-sm text-muted">
+          <input
+            type="checkbox"
+            name="is_reconstituted"
+            checked={isRecon}
+            onChange={(e) => setIsRecon(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>This vial is a powder I mix before use (e.g. hCG, a peptide)</span>
+        </label>
+
+        {isRecon ? (
+          <p className="text-xs text-faint">
+            A powder&rsquo;s strength depends on how much liquid you add. Enter the
+            active amount printed on the vial and the volume your{" "}
+            <span className="text-muted">prescription</span> tells you to add — we
+            work out the concentration. The volume comes from your prescription, not
+            from us.
+          </p>
+        ) : (
+          <p className="text-xs text-faint">
+            How strong the liquid is — e.g. 200 mg in every 1 mL. This is the
+            vial&rsquo;s label, not your dose. We use it to work out the syringe
+            volume below.
+          </p>
+        )}
+
         <div className="grid gap-4 sm:grid-cols-3">
-          <Labeled label="Concentration" confidence={concentration.amountConfidence}>
+          <Labeled
+            label={isRecon ? "Active in the vial" : "Concentration"}
+            confidence={concentration.amountConfidence}
+          >
             <input
               name="concentration_amount"
               type="number"
@@ -333,7 +375,7 @@ function InjectableFields({
               className={INPUT_CLASS}
             />
           </Labeled>
-          <Labeled label="Conc. unit" confidence={concentration.unitConfidence}>
+          <Labeled label={isRecon ? "Active unit" : "Conc. unit"} confidence={concentration.unitConfidence}>
             <select
               name="concentration_unit"
               value={cUnit}
@@ -348,7 +390,7 @@ function InjectableFields({
             </select>
           </Labeled>
           <Labeled
-            label="Per volume (mL)"
+            label={isRecon ? "Water to add (mL)" : "Per volume (mL)"}
             confidence={concentration.perVolumeConfidence}
           >
             <input
@@ -357,24 +399,57 @@ function InjectableFields({
               step="any"
               value={cPer}
               onChange={(e) => setCPer(e.target.value)}
+              placeholder={isRecon ? "from your prescription" : undefined}
               className={INPUT_CLASS}
             />
           </Labeled>
         </div>
-        <Labeled
-          label="Total volume in vial (mL)"
-          confidence={concentration.volumeConfidence}
-        >
-          <input
-            name="volume_ml"
-            type="number"
-            step="any"
-            defaultValue={
-              concentration.volumeMl != null ? String(concentration.volumeMl) : ""
-            }
-            className={INPUT_CLASS}
-          />
-        </Labeled>
+
+        {isRecon ? (
+          <>
+            <div>
+              <label htmlFor="diluent_type" className="block text-sm text-muted">
+                Diluent (what you mix with)
+              </label>
+              <select
+                id="diluent_type"
+                name="diluent_type"
+                value={diluent}
+                onChange={(e) => setDiluent(e.target.value)}
+                className={INPUT_CLASS}
+              >
+                {DILUENTS.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {concKnown ? (
+              <p className="rounded-md border border-accent/40 bg-surface p-3 text-sm text-paper">
+                <span className="font-medium text-accent">After mixing</span> —{" "}
+                {cAmountN} {cUnit} in {cPerN} mL {diluent} works out to{" "}
+                {Number((cAmountN / cPerN).toFixed(2))} {cUnit}/mL. A units
+                conversion to help you measure; always follow your prescription.
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <Labeled
+            label="Total volume in vial (mL)"
+            confidence={concentration.volumeConfidence}
+          >
+            <input
+              name="volume_ml"
+              type="number"
+              step="any"
+              defaultValue={
+                concentration.volumeMl != null ? String(concentration.volumeMl) : ""
+              }
+              className={INPUT_CLASS}
+            />
+          </Labeled>
+        )}
       </fieldset>
 
       <fieldset className="space-y-4 rounded-md border border-line p-4">

@@ -24,6 +24,13 @@ export type VialExtraction = {
   concentration_unit: ExtractedField;
   concentration_per_volume: ExtractedField<number | null>;
   volume_ml: ExtractedField<number | null>;
+  // Reconstitution (PRD §5.2): a lyophilized powder that must be mixed with a
+  // diluent before use. For a powder, concentration_amount holds the TOTAL
+  // active in the vial and concentration_per_volume is null until mixed; the
+  // mix volume comes from the prescription, never the label.
+  requires_reconstitution: ExtractedField;
+  diluent_type: ExtractedField;
+  reconstitution_note: ExtractedField;
   route: ExtractedField;
   // Free-text dosing instructions printed on a dispensed label, e.g.
   // "Take 1 tablet by mouth every morning". Empty for bare manufacturer vials.
@@ -42,6 +49,11 @@ export type PrescriptionExtraction = {
   route: ExtractedField;
   prescriber: ExtractedField;
   refills: ExtractedField<number | null>;
+  // Reconstitution mix instruction (the only place the diluent volume comes
+  // from — the prescriber's instruction, never an app suggestion).
+  diluent_volume_ml: ExtractedField<number | null>;
+  diluent_type: ExtractedField;
+  reconstitution_note: ExtractedField;
 };
 
 export type ExtractionType = "vial" | "prescription";
@@ -148,7 +160,7 @@ function extractJson(raw: string): Record<string, unknown> | null {
   return null;
 }
 
-function parseVialExtraction(raw: string): VialExtraction | null {
+export function parseVialExtraction(raw: string): VialExtraction | null {
   const obj = extractJson(raw);
   if (!obj) return null;
 
@@ -160,6 +172,9 @@ function parseVialExtraction(raw: string): VialExtraction | null {
     concentration_unit: parseStringField(obj, "concentration_unit"),
     concentration_per_volume: parseNumberField(obj, "concentration_per_volume"),
     volume_ml: parseNumberField(obj, "volume_ml"),
+    requires_reconstitution: parseStringField(obj, "requires_reconstitution"),
+    diluent_type: parseStringField(obj, "diluent_type"),
+    reconstitution_note: parseStringField(obj, "reconstitution_note"),
     route: parseStringField(obj, "route"),
     directions: parseStringField(obj, "directions"),
     expiry_date: parseStringField(obj, "expiry_date"),
@@ -168,7 +183,9 @@ function parseVialExtraction(raw: string): VialExtraction | null {
   };
 }
 
-function parsePrescriptionExtraction(raw: string): PrescriptionExtraction | null {
+export function parsePrescriptionExtraction(
+  raw: string
+): PrescriptionExtraction | null {
   const obj = extractJson(raw);
   if (!obj) return null;
 
@@ -181,6 +198,9 @@ function parsePrescriptionExtraction(raw: string): PrescriptionExtraction | null
     route: parseStringField(obj, "route"),
     prescriber: parseStringField(obj, "prescriber"),
     refills: parseNumberField(obj, "refills"),
+    diluent_volume_ml: parseNumberField(obj, "diluent_volume_ml"),
+    diluent_type: parseStringField(obj, "diluent_type"),
+    reconstitution_note: parseStringField(obj, "reconstitution_note"),
   };
 }
 

@@ -180,6 +180,26 @@ export type Concentration = {
   volume_unit: "mL" | "tablet" | "capsule";
 };
 
+// Reconstitution metadata (PRD §5.2): how a lyophilized powder was prepared.
+// The working numbers live in Concentration (amount = total active in the vial,
+// per_volume = the diluent volume the user added per their prescription); this
+// records the provenance for display. The app never suggests the volume.
+export type Reconstitution = {
+  requires_reconstitution: boolean;
+  diluent_type: string;
+  diluent_volume_ml: number;
+  powder_amount: number;
+  powder_unit: DoseUnit;
+  note?: string;
+};
+
+/** Common reconstitution diluents (for the picker). American English. */
+export const DILUENTS = [
+  "bacteriostatic water",
+  "sterile water",
+  "0.9% sodium chloride",
+] as const;
+
 export type SyringeSpec = {
   capacity_mL: number;
   needle_gauge: number;

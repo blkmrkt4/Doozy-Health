@@ -218,6 +218,10 @@ export default async function ExtractionReviewPage({
                 unitConfidence: vial.concentration_unit.confidence,
                 perVolumeConfidence: vial.concentration_per_volume.confidence,
                 volumeConfidence: vial.volume_ml.confidence,
+                requiresReconstitution: /^y/i.test(
+                  vial.requires_reconstitution?.value ?? ""
+                ),
+                diluentType: vial.diluent_type?.value ?? "",
               }}
             />
 

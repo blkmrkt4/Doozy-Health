@@ -81,6 +81,13 @@ type DeliveryForm = {
     needle_length_in?: number;
     unit_markings?: string;
   } | null;
+  reconstitution: {
+    requires_reconstitution?: boolean;
+    diluent_type?: string;
+    diluent_volume_ml?: number;
+    powder_amount?: number;
+    powder_unit?: string;
+  } | null;
   package_count: string | null;
   package_unit: string | null;
   expiry_date: string | null;
@@ -529,6 +536,25 @@ export default async function MedicationDetailPage({
                 isPatch={delivery?.form_type === "patch"}
               />
             </div>
+            {delivery?.reconstitution?.requires_reconstitution &&
+            delivery.reconstitution.powder_amount &&
+            delivery.reconstitution.diluent_volume_ml ? (
+              <p className="text-xs text-faint">
+                Reconstituted: {delivery.reconstitution.powder_amount}{" "}
+                {delivery.reconstitution.powder_unit ?? delivery.concentration?.unit} +{" "}
+                {delivery.reconstitution.diluent_volume_ml} mL{" "}
+                {delivery.reconstitution.diluent_type || "diluent"} →{" "}
+                {delivery.concentration
+                  ? `${Number(
+                      (
+                        delivery.concentration.amount /
+                        delivery.concentration.per_volume
+                      ).toFixed(2)
+                    )} ${delivery.concentration.unit}/mL`
+                  : null}
+                . Illustrative — follow your prescription.
+              </p>
+            ) : null}
           </section>
         ) : null}
 

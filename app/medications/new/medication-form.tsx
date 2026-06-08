@@ -4,6 +4,7 @@ import { useState } from "react";
 import { createMedication } from "@/app/medications/actions";
 import { DrugSearch } from "./drug-search";
 import {
+  DILUENTS,
   DOSE_UNITS,
   FORM_TYPES,
   FORM_TYPE_LABELS,
@@ -396,6 +397,36 @@ export function MedicationForm({
             <span className="pb-2 text-sm text-faint">mL</span>
           </div>
         </div>
+
+        {showSyringe ? (
+          <div className="space-y-2 rounded-md border border-line p-3">
+            <label className="flex items-start gap-2 text-sm text-muted">
+              <input type="checkbox" name="is_reconstituted" className="mt-0.5" />
+              <span>This vial is a powder I mix before use (e.g. hCG, a peptide)</span>
+            </label>
+            <p className="text-xs text-faint">
+              For a powder, put the active amount in the vial in{" "}
+              <span className="text-muted">Amount</span> above and the volume your
+              prescription says to add in <span className="text-muted">Volume</span> —
+              the concentration is amount ÷ volume. The mix volume comes from your
+              prescription, not from us.
+            </p>
+            <label className={labelCls}>
+              Diluent
+              <select
+                name="diluent_type"
+                defaultValue="bacteriostatic water"
+                className={inputCls}
+              >
+                {DILUENTS.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        ) : null}
 
         <div className="flex gap-3">
           <label className={`${labelCls} flex-1`}>

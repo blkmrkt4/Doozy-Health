@@ -25,6 +25,7 @@ import {
   type Concentration,
   type DoseUnit,
   type Frequency,
+  type Reconstitution,
   type Route,
   type SyringeSpec,
 } from "@/lib/types";
@@ -43,6 +44,29 @@ import { logWarn } from "@/lib/log";
 
 function failNew(message: string): never {
   redirect(`/medications/new?error=${encodeURIComponent(message)}`);
+}
+
+/**
+ * Build the reconstitution record when the user marked a vial as a powder they
+ * mix. The concentration already carries the working numbers (amount = total
+ * active in the vial, per_volume = the diluent volume the prescription says to
+ * add); this records the provenance for display. Returns undefined when not a
+ * reconstituted injectable.
+ */
+function buildReconstitution(
+  formData: FormData,
+  concentration: Concentration | null | undefined
+): Reconstitution | undefined {
+  if (str(formData, "is_reconstituted") !== "on") return undefined;
+  if (!concentration || concentration.volume_unit !== "mL") return undefined;
+  if (!(concentration.amount > 0) || !(concentration.per_volume > 0)) return undefined;
+  return {
+    requires_reconstitution: true,
+    diluent_type: str(formData, "diluent_type") || "bacteriostatic water",
+    diluent_volume_ml: concentration.per_volume,
+    powder_amount: concentration.amount,
+    powder_unit: concentration.unit,
+  };
 }
 
 /**
@@ -171,6 +195,10 @@ export async function createMedication(formData: FormData) {
     };
   }
 
+  // Reconstitution (powder + diluent → concentration). The concentration above
+  // carries the working numbers; this records the provenance for display.
+  const reconstitution = buildReconstitution(formData, concentration);
+
   // Optional syringe spec (injectables only; the form hides it otherwise).
   let syringeSpec: SyringeSpec | undefined;
   const capacity = Number(str(formData, "syringe_capacity_ml"));
@@ -209,6 +237,7 @@ export async function createMedication(formData: FormData) {
       p_delivery: {
         form_type: formType,
         ...(concentration ? { concentration } : {}),
+        ...(reconstitution ? { reconstitution } : {}),
         package_count: str(formData, "package_count"),
         package_unit: str(formData, "package_unit"),
         ...(syringeSpec ? { syringe_spec: syringeSpec } : {}),
@@ -1063,6 +1092,8 @@ export async function confirmPhotoExtraction(formData: FormData) {
     }
   }
 
+  const reconstitution = buildReconstitution(formData, concentration);
+
   // Schedule captured on the review form (falls back to PRN if not set).
   const frequency: Frequency =
     parseFrequency(formData, "freq") ?? { type: "as_needed" };
@@ -1083,6 +1114,7 @@ export async function confirmPhotoExtraction(formData: FormData) {
       p_delivery: {
         form_type: formType,
         ...(concentration ? { concentration } : {}),
+        ...(reconstitution ? { reconstitution } : {}),
         expiry_date: str(formData, "expiry_date"),
         batch: str(formData, "batch"),
         manufacturer: str(formData, "manufacturer"),
