@@ -166,10 +166,10 @@ export function ScanForm() {
           {/* Multi-photo guidance — same item from several angles, or a
               powder vial paired with its diluent vial, read together. */}
           <p className="text-xs text-faint">
-            You can add several photos{full ? " (max 5)" : ""} and we&rsquo;ll
-            read them together — for example, the different sides of a curved
-            label that won&rsquo;t fit in one shot, or a powder vial plus its
-            bacteriostatic-water vial. A prescription is best scanned on its own.
+            You can add several photos and we&rsquo;ll read them together — for
+            example, the different sides of a curved label that won&rsquo;t fit in
+            one shot, or a powder vial plus its bacteriostatic-water vial
+            {full ? " (up to 5)" : ""}. A prescription is best scanned on its own.
           </p>
 
           {files.length > 0 ? (

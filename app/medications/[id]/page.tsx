@@ -53,7 +53,7 @@ import {
 } from "@/lib/documents";
 import { LogDoseForm } from "./log-dose-form";
 import { SyringeVisual } from "@/app/medications/_components/syringe-visual";
-import { buildSetupChecklist, setupComplete } from "@/lib/medication-setup";
+import { buildSetupChecklist } from "@/lib/medication-setup";
 import { SetupChecklist } from "@/app/medications/[id]/_components/setup-checklist";
 
 type Regimen = {
@@ -472,18 +472,6 @@ export default async function MedicationDetailPage({
           ) : null}
         </div>
 
-        {/* Setup checklist (PRD §5.1–5.3). Prominent right after adding (?new=1);
-            otherwise shown only while something's still missing. */}
-        {setupItems.length > 0 && (isNew || !setupComplete(setupItems)) ? (
-          <SetupChecklist
-            medicationId={med.id}
-            items={setupItems}
-            syringes={syringes}
-            currentSyringeId={med.syringe_id}
-            isOwner={isOwner}
-            prominent={Boolean(isNew)}
-          />
-        ) : null}
 
         {/* Inline modelled-level chart (PRD §5.7). Illustrative, labelled. */}
         {pkSeries ? (
@@ -767,6 +755,18 @@ export default async function MedicationDetailPage({
               </>
             )}
           </section>
+        ) : null}
+
+        {/* Setup checklist (PRD §5.1–5.3) — a collapsed twisty here; the live
+            checklist for adding lives on the Add screen. Editable in place. */}
+        {setupItems.length > 0 ? (
+          <SetupChecklist
+            medicationId={med.id}
+            items={setupItems}
+            syringes={syringes}
+            currentSyringeId={med.syringe_id}
+            isOwner={isOwner}
+          />
         ) : null}
 
         {/* Photos & documents (PRD §5.1). Attach a vial/prescription photo for

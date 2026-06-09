@@ -19,38 +19,34 @@ export function SetupChecklist({
   syringes,
   currentSyringeId,
   isOwner,
-  prominent,
 }: {
   medicationId: string;
   items: SetupItem[];
   syringes: { id: string; label: string }[];
   currentSyringeId: string | null;
   isOwner: boolean;
-  /** Render expanded + highlighted (just-added medication, ?new=1). */
-  prominent: boolean;
 }) {
   const tracked = items.filter((i) => i.tier !== "awareness");
   const done = tracked.filter((i) => i.satisfied).length;
   const allDone = done === tracked.length;
 
+  // A collapsed twisty on the detail page — tucked, not at the top (the live
+  // checklist for adding lives on the Add screen).
   return (
-    <section
-      className={`rounded-md border p-4 ${
-        prominent ? "border-accent/40 bg-surface" : "border-line"
-      }`}
-    >
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-sm font-medium text-paper">Setup</h2>
+    <details className="rounded-md border border-line">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5 text-sm font-medium text-paper">
+        <span>Setup</span>
         <span className="text-xs text-faint">
-          {allDone ? "All set" : `${done} of ${tracked.length} done`}
+          {allDone ? "All set" : `${done} of ${tracked.length} to add`}
         </span>
-      </div>
-      <p className="mt-0.5 text-xs text-faint">
-        What this medication references — add each by photo or by hand. Nothing
-        here blocks logging.
-      </p>
+      </summary>
+      <div className="space-y-3 border-t border-line p-4">
+        <p className="text-xs text-faint">
+          What this medication references — add each by photo or by hand. Nothing
+          here blocks logging.
+        </p>
 
-      <ul className="mt-3 space-y-3">
+        <ul className="space-y-3">
         {items.map((item) => (
           <li key={item.key} className="flex items-start gap-2 text-sm">
             <span
@@ -141,7 +137,8 @@ export function SetupChecklist({
             </div>
           </li>
         ))}
-      </ul>
-    </section>
+        </ul>
+      </div>
+    </details>
   );
 }
