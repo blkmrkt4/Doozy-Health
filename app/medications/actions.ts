@@ -38,6 +38,7 @@ import {
   type PrescriptionExtraction,
 } from "@/lib/extraction";
 import { accessoriesFromRequiredComponents } from "@/lib/medication-setup";
+import { resolveOrCreateCanonicalDrug } from "@/lib/drug-reference";
 import { generateReminders } from "@/lib/reminders";
 import { explainInteraction } from "@/lib/interactions";
 import { nextMedColour } from "@/lib/colours";
@@ -220,6 +221,15 @@ export async function createMedication(formData: FormData) {
     : prescribed;
   const reasonNote = choseDiffers ? str(formData, "chosen_reason_note") : "";
 
+  // Resolve the central drug reference inline (PRD §5.7): a known drug is a pure
+  // cache hit; an unknown one is looked up once and cached for everyone. Failure
+  // just leaves canonical_drug_id null (no modelled-level chart) — never blocks.
+  const resolvedCanonicalId = await resolveOrCreateCanonicalDrug({
+    name: displayName,
+    route: chosen.route,
+    canonicalDrugId,
+  });
+
   const { data: medId, error } = await supabase.rpc(
     "create_manual_medication",
     {
@@ -253,7 +263,7 @@ export async function createMedication(formData: FormData) {
         frequency: chosen.frequency,
         reason_note: reasonNote,
       },
-      p_canonical_drug_id: canonicalDrugId,
+      p_canonical_drug_id: resolvedCanonicalId,
     }
   );
 
@@ -1211,6 +1221,12 @@ export async function confirmPhotoExtraction(formData: FormData) {
       .eq("id", medId);
   }
 
+  // Resolve/cache the central drug reference for the chart (PRD §5.7).
+  const vialCanonicalId = await resolveOrCreateCanonicalDrug({ name: displayName, route });
+  if (vialCanonicalId) {
+    await admin.from("medications").update({ canonical_drug_id: vialCanonicalId }).eq("id", medId as string);
+  }
+
   // Gather user-confirmed values for delta comparison.
   const userValues: Record<string, string> = {
     drug_name_raw: displayName,
@@ -1355,6 +1371,12 @@ export async function confirmPrescriptionExtraction(formData: FormData) {
       .from("medications")
       .update({ accessories: rxAccessories })
       .eq("id", medId);
+  }
+
+  // Resolve/cache the central drug reference for the chart (PRD §5.7).
+  const rxCanonicalId = await resolveOrCreateCanonicalDrug({ name: displayName, route });
+  if (rxCanonicalId) {
+    await admin.from("medications").update({ canonical_drug_id: rxCanonicalId }).eq("id", medId as string);
   }
 
   // Write extraction deltas.

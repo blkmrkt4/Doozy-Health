@@ -18,7 +18,8 @@ export type LogScope =
   | "auth"
   | "reminders"
   | "sms"
-  | "push";
+  | "push"
+  | "drug-reference";
 
 type LogMeta = Record<string, string | number | boolean | null | undefined>;
 

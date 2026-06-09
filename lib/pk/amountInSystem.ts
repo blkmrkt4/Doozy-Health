@@ -40,6 +40,22 @@ export interface DrugPK {
   confidence?: "high" | "medium" | "low";
 }
 
+/**
+ * Derive a chart provenance from a `drugs.reference_data` jsonb. A row populated
+ * by the self-filling cache carries `{ source: "llm_estimated" }`; anything else
+ * (the curated catalogue) is treated as curated. Keeps the "illustrative, AI
+ * looked-up" labeling honest wherever a drug row feeds the chart (PRD §5.7/§6.1).
+ */
+export function provenanceFromReferenceData(
+  referenceData: unknown
+): DrugPK["provenance"] {
+  const source =
+    referenceData && typeof referenceData === "object"
+      ? (referenceData as { source?: unknown }).source
+      : undefined;
+  return source === "llm_estimated" ? "llm_estimated" : "curated";
+}
+
 export interface DoseEvent {
   /** days from the chart's time origin */
   t: number;

@@ -165,7 +165,7 @@ function parseRequiredComponents(
  * Extract the first JSON object from an LLM response, tolerating markdown
  * code fences and surrounding text (PRD §14.6 — caller parses defensively).
  */
-function extractJson(raw: string): Record<string, unknown> | null {
+export function extractJson(raw: string): Record<string, unknown> | null {
   // Strip markdown fences.
   let text = raw.replace(/```(?:json)?\s*/gi, "").replace(/```/g, "");
 

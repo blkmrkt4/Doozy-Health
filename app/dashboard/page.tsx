@@ -19,11 +19,12 @@ import {
   type MedLogMeta,
 } from "@/lib/adherence";
 import { resolveParams, type DoseEvent } from "@/lib/pharmacokinetics";
-import type {
-  DrugPK,
-  DoseEvent as AisDoseEvent,
-  PrescribedRegimen,
-  Route,
+import {
+  provenanceFromReferenceData,
+  type DrugPK,
+  type DoseEvent as AisDoseEvent,
+  type PrescribedRegimen,
+  type Route,
 } from "@/lib/pk/amountInSystem";
 import {
   isFrequency,
@@ -324,7 +325,7 @@ export default async function DashboardPage({
       .from("drugs")
       .select(
         "id, half_life_hours, half_life_range_hours, bioavailability, tmax_hours, " +
-          "kernel_by_route, release_duration_hours, is_linear, nonlinear_reason, metabolites"
+          "kernel_by_route, release_duration_hours, is_linear, nonlinear_reason, metabolites, reference_data"
       )
       .in("id", pkDrugIds);
     const drugById = new Map(
@@ -395,7 +396,7 @@ export default async function DashboardPage({
         releaseDurationDays: params.releaseDurationHours
           ? params.releaseDurationHours / 24
           : undefined,
-        provenance: "curated",
+        provenance: provenanceFromReferenceData(drug.reference_data),
       };
 
       const prescribed: PrescribedRegimen = {

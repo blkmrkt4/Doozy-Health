@@ -15,6 +15,10 @@ import {
 } from "@/lib/pharmacokinetics";
 import { PkChart } from "./timeline/pk-chart";
 import {
+  provenanceFromReferenceData,
+  type DrugPK,
+} from "@/lib/pk/amountInSystem";
+import {
   FORM_TYPE_LABELS,
   INJECTABLE_FORM_TYPES,
   isFrequency,
@@ -315,15 +319,19 @@ export default async function MedicationDetailPage({
   // reference. Deterministic — no LLM (rule #8). Only for linear drugs with PK
   // reference data; the full chart with axes/calibration is on /timeline.
   let pkSeries: ReturnType<typeof buildMedicationPkSeries> | null = null;
+  let pkProvenance: DrugPK["provenance"] = "curated";
   if (med.canonical_drug_id && chosen && isFrequency(chosen.frequency)) {
     const { data: drug } = await supabase
       .from("drugs")
       .select(
         "half_life_hours, half_life_range_hours, bioavailability, tmax_hours, " +
-          "kernel_by_route, release_duration_hours, is_linear, nonlinear_reason, metabolites"
+          "kernel_by_route, release_duration_hours, is_linear, nonlinear_reason, metabolites, reference_data"
       )
       .eq("id", med.canonical_drug_id)
       .single();
+    pkProvenance = provenanceFromReferenceData(
+      (drug as { reference_data?: unknown } | null)?.reference_data
+    );
     const params = drug
       ? resolveParams(
           drug as unknown as Parameters<typeof resolveParams>[0],
@@ -490,7 +498,7 @@ export default async function MedicationDetailPage({
               on textbook half-life — past 30 days and the next 14. The dashed
               line is where you&rsquo;d sit if you follow your schedule.
             </p>
-            <PkChart series={pkSeries.series} overlay={pkSeries.overlay} height={230} />
+            <PkChart series={pkSeries.series} overlay={pkSeries.overlay} height={230} provenance={pkProvenance} />
             <p className="mt-3 text-[11px] text-faint">
               Illustrative, not a measurement of your actual level. Not medical
               advice.

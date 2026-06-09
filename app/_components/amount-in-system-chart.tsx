@@ -39,6 +39,8 @@ const FOOTER =
   "Estimated amount in system · illustrative · based on textbook half-life · not medical advice";
 const FOOTER_CALIBRATED =
   "Your personal estimate, based on the readings you entered. Illustrative, not a measurement. Not medical advice.";
+const FOOTER_ESTIMATED =
+  "Half-life looked up by AI from published population data · illustrative, not a measurement · not medical advice";
 
 const MONTHS = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -83,7 +85,11 @@ export function AmountInSystemChart({
 }) {
   const title = `${drug.name} — amount in your system`;
   const footer =
-    drug.provenance === "user_calibrated" ? FOOTER_CALIBRATED : FOOTER;
+    drug.provenance === "user_calibrated"
+      ? FOOTER_CALIBRATED
+      : drug.provenance === "llm_estimated"
+        ? FOOTER_ESTIMATED
+        : FOOTER;
 
   // ── Linearity gate (§4.7): no curve, honest panel. ────────────────────────
   if (!drug.isLinear) {

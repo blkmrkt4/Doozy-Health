@@ -10,6 +10,10 @@ import {
   type CalibrationReading,
 } from "@/lib/pharmacokinetics";
 import { PkChart, NonLinearPanel } from "./pk-chart";
+import {
+  provenanceFromReferenceData,
+  type DrugPK,
+} from "@/lib/pk/amountInSystem";
 
 // Pharmacokinetic timeline page (PRD §4.4, §5.7, §13.11).
 // v0.4: linearity gate, uncertainty band, metabolites, steady-state,
@@ -59,16 +63,20 @@ export default async function TimelinePage({
 
   // Load drug PK params (v0.4: includes kernel, range, metabolites, linearity).
   let pkParams = null;
+  let pkProvenance: DrugPK["provenance"] = "curated";
   if (med.canonical_drug_id) {
     const { data: drug } = await supabase
       .from("drugs")
       .select(
         "half_life_hours, half_life_range_hours, bioavailability, tmax_hours, " +
-          "kernel_by_route, release_duration_hours, is_linear, nonlinear_reason, metabolites"
+          "kernel_by_route, release_duration_hours, is_linear, nonlinear_reason, metabolites, reference_data"
       )
       .eq("id", med.canonical_drug_id)
       .single();
 
+    pkProvenance = provenanceFromReferenceData(
+      (drug as { reference_data?: unknown } | null)?.reference_data
+    );
     if (drug) {
       pkParams = resolveParams(
         drug as unknown as {
@@ -240,6 +248,7 @@ export default async function TimelinePage({
           <PkChart
             series={actualSeries}
             overlay={isCalibrated ? textbookSeries : overlaySeries}
+            provenance={isCalibrated ? "user_calibrated" : pkProvenance}
           />
         </div>
 

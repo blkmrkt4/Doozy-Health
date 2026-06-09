@@ -37,12 +37,15 @@ export function PkChart({
   width = 720,
   height = 260,
   showLegend = true,
+  provenance,
 }: {
   series: PkTimeSeries;
   overlay?: PkTimeSeries;
   width?: number;
   height?: number;
   showLegend?: boolean;
+  /** when "llm_estimated", note the half-life was AI looked-up (PRD §5.7/§6.1) */
+  provenance?: "curated" | "llm_extracted" | "llm_estimated" | "user_calibrated";
 }) {
   if (series.points.length < 2) {
     return <p className="text-sm text-faint">Not enough data to chart.</p>;
@@ -204,6 +207,13 @@ export function PkChart({
             <span className="inline-block h-2 w-0.5 bg-accent" /> dose taken
           </span>
         </div>
+      ) : null}
+
+      {provenance === "llm_estimated" ? (
+        <p className="mt-1 text-[10px] text-faint">
+          Half-life looked up by AI from published population data · illustrative,
+          not a measurement · not medical advice
+        </p>
       ) : null}
     </div>
   );
