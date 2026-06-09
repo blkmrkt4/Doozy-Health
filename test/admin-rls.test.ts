@@ -115,8 +115,12 @@ describe.skipIf(!STACK_READY)("admin backend RLS", () => {
       .select("slug, status")
       .order("slug");
     expect(error).toBeNull();
-    // 7 original seed prompts + extract_syringe (migration 20260605000003).
-    expect(data!.length).toBe(8);
+    // Seed prompts grow as features add prompt migrations (extract_syringe,
+    // required_components, lookup_drug_pk, …). Assert a floor and that the
+    // expected seeds are present, rather than an exact count that drifts with
+    // every new prompt migration.
+    expect(data!.length).toBeGreaterThanOrEqual(8);
+    expect(data!.map((r) => r.slug)).toContain("lookup_drug_pk");
     // Seed prompts may be active or disabled depending on setup.
     for (const row of data!) {
       expect(["active", "disabled"]).toContain(row.status);
@@ -156,8 +160,9 @@ describe.skipIf(!STACK_READY)("admin backend RLS", () => {
       .from("prompt_bindings")
       .select("*");
     expect(error).toBeNull();
-    // 7 original + extract_syringe (migration 20260605000003).
-    expect(data!.length).toBe(8);
+    // One binding per bound prompt; grows with each new prompt migration
+    // (see the seeded-prompts test). Assert a floor, not an exact count.
+    expect(data!.length).toBeGreaterThanOrEqual(8);
   });
 
   // ── llm_call_logs: admin-only ──

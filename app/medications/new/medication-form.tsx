@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createMedication } from "@/app/medications/actions";
-import { COMPLIANCE_COLOURS } from "@/lib/colours";
 import { DrugSearch } from "./drug-search";
 import {
   DILUENTS,
@@ -20,41 +19,88 @@ import {
 const inputCls =
   "mt-1 block w-full rounded-md border border-line bg-surface px-3 py-2 text-base text-paper outline-none focus:border-accent";
 const labelCls = "block text-sm text-muted";
-const GREEN = COMPLIANCE_COLOURS.full; // the project's "done" green
 
 type RowStatus = "done" | "todo" | "optional" | "na";
 
+// Status chips read as state, not as another field: a coloured pill with an
+// icon. "done"/"todo" use the semantic ok/danger tokens (so they adapt to the
+// theme); "optional"/"na" stay quiet. Red here is form-validation state (the
+// same family as .alert-error), not the PK chart or adherence calendar.
+const PILL: Record<
+  RowStatus,
+  { label: string; bg: string; text: string; border: string }
+> = {
+  done: {
+    label: "✓ Have it",
+    bg: "var(--color-ok-bg)",
+    text: "var(--color-ok-text)",
+    border: "var(--color-ok-line)",
+  },
+  todo: {
+    label: "✗ Needed",
+    bg: "var(--color-danger-bg)",
+    text: "var(--color-danger-text)",
+    border: "var(--color-danger-line)",
+  },
+  optional: {
+    label: "Optional",
+    bg: "transparent",
+    text: "var(--color-muted)",
+    border: "var(--color-line)",
+  },
+  na: {
+    label: "Not needed",
+    bg: "transparent",
+    text: "var(--color-faint)",
+    border: "transparent",
+  },
+};
+
 /** Status indicator on a checklist row's summary line. */
 function StatusPill({ status }: { status: RowStatus }) {
-  if (status === "done")
-    return (
-      <span className="text-xs" style={{ color: GREEN }}>
-        ✓ added
-      </span>
-    );
-  if (status === "na") return <span className="text-xs text-faint">not needed</span>;
-  if (status === "optional") return <span className="text-xs text-faint">optional</span>;
-  return <span className="text-xs text-accent">needs info</span>; // todo
+  const p = PILL[status];
+  return (
+    <span
+      className="shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-medium"
+      style={{ backgroundColor: p.bg, color: p.text, borderColor: p.border }}
+    >
+      {p.label}
+    </span>
+  );
 }
 
-/** One collapsible checklist row: a one-line summary that opens to its inputs. */
+/** One collapsible checklist row: a one-line summary that opens to its inputs.
+ *  `missing` names the single critical thing a partly-filled row still needs
+ *  (e.g. a syringe's size), shown as a sub-point under the title. */
 function Row({
   title,
   status,
   defaultOpen,
   hint,
+  missing,
   children,
 }: {
   title: string;
   status: RowStatus;
   defaultOpen?: boolean;
   hint?: string;
+  missing?: string;
   children: React.ReactNode;
 }) {
   return (
     <details open={defaultOpen} className="rounded-md border border-line">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm">
-        <span className="font-medium text-paper">{title}</span>
+        <span className="min-w-0">
+          <span className="font-medium text-paper">{title}</span>
+          {missing && status === "todo" ? (
+            <span
+              className="mt-0.5 block text-xs"
+              style={{ color: "var(--color-danger-text)" }}
+            >
+              Still needs: {missing}
+            </span>
+          ) : null}
+        </span>
         <StatusPill status={status} />
       </summary>
       <div className="space-y-4 border-t border-line p-4">
@@ -303,6 +349,7 @@ export function MedicationForm({
   // uncontrolled). Green ticks appear as each component is filled in.
   const formRef = useRef<HTMLFormElement>(null);
   const [st, setSt] = useState({
+    name: Boolean(init.drugName),
     prescription: Number(init.prescribed?.doseAmount ?? 0) > 0,
     label: Number(init.delivery?.concAmount ?? 0) > 0,
     syringe: Boolean(init.syringeId) || Number(init.delivery?.syringeCapacityMl ?? 0) > 0,
@@ -316,6 +363,7 @@ export function MedicationForm({
     const n = (k: string) => Number(fd.get(k) ?? 0);
     const v = (k: string) => String(fd.get(k) ?? "");
     setSt({
+      name: v("drug_name").trim().length > 0,
       prescription: n("prescribed_dose_amount") > 0,
       label: n("conc_amount") > 0,
       syringe: !!v("syringe_id") || n("syringe_capacity_ml") > 0,
@@ -333,6 +381,12 @@ export function MedicationForm({
   const labelStatus: RowStatus = st.label ? "done" : "optional";
   const syringeStatus: RowStatus = st.syringe ? "done" : "todo";
   const diluentStatus: RowStatus = !st.isRecon ? "na" : st.mixVolume ? "done" : "todo";
+
+  // The bottom line the user actually cares about: do we have enough to start
+  // diarizing this product? The server requires only a name and a complete
+  // prescribed regimen (dose + units + schedule); everything else is optional
+  // and only sharpens the illustrative estimate.
+  const ready = st.name && st.prescription;
 
   return (
     <form
@@ -367,6 +421,28 @@ export function MedicationForm({
         Each component below is its own line — open one to fill it in. Add what
         you have now; you can always come back for the rest.
       </p>
+
+      {/* Bottom-line readiness: can we start diarizing yet? Green once the one
+          required component (the prescribed regimen) is in; neutral guidance
+          otherwise — not an error, just what's left to start. */}
+      {ready ? (
+        <div className="rounded-md border alert-success px-4 py-3 text-sm">
+          <span className="font-medium">Ready to track.</span> You can save now
+          and start logging doses. Everything below is optional — it just
+          sharpens the estimate.
+        </div>
+      ) : (
+        <div
+          className="rounded-md border px-4 py-3 text-sm"
+          style={{ borderColor: "var(--color-line)", color: "var(--color-muted)" }}
+        >
+          <span className="font-medium text-paper">Almost there.</span> To start
+          tracking, add {st.name ? "" : "the medication name and "}the dose
+          &amp; schedule under{" "}
+          <span className="text-paper">Prescription</span>. Everything else is
+          optional.
+        </div>
+      )}
 
       {/* Prescription */}
       <Row
@@ -497,6 +573,7 @@ export function MedicationForm({
         <Row
           title="Syringe"
           status={syringeStatus}
+          missing="the syringe size (mL)"
           hint="Pick the syringe you'll use (or add one) — its size shows the fill line."
         >
           <label className={labelCls}>
