@@ -331,6 +331,15 @@ export function isFieldType(v: string): v is FieldType {
   return (FIELD_TYPES as readonly string[]).includes(v);
 }
 
+// Daily vs periodic (labs/measurements). Periodic fields are logged "when you
+// have a result" and stay out of the daily entry form (PRD §5.9).
+export const FIELD_CADENCES = ["daily", "periodic"] as const;
+export type FieldCadence = (typeof FIELD_CADENCES)[number];
+
+export function isFieldCadence(v: string): v is FieldCadence {
+  return (FIELD_CADENCES as readonly string[]).includes(v);
+}
+
 export type TrackedField = {
   id: string;
   patient_id?: string;
@@ -340,9 +349,19 @@ export type TrackedField = {
   category_options: string[] | null;
   display_order?: number;
   active?: boolean;
+  cadence?: FieldCadence;
   /** medication_ids this field is scoped to; empty = applies to all (general). */
   medicationIds?: string[];
 };
+
+// Patient sex — used only to order/filter which diary templates are visible
+// (never to auto-select anything). Keyed to the patient, not the account holder.
+export const PATIENT_SEXES = ["male", "female"] as const;
+export type PatientSex = (typeof PATIENT_SEXES)[number];
+
+export function isPatientSex(v: string): v is PatientSex {
+  return (PATIENT_SEXES as readonly string[]).includes(v);
+}
 
 export type DiaryFieldValue = string | number | boolean | string[] | null;
 
