@@ -61,6 +61,10 @@ export type PrescriptionExtraction = {
   frequency: ExtractedField;
   duration_days: ExtractedField<number | null>;
   route: ExtractedField;
+  // The full dosing instruction copied verbatim ("one drop in both eyes once
+  // per day before bed"). frequency carries only the structured cadence; the
+  // rest of the sentence (time of day, site) is kept here for Directions.
+  directions: ExtractedField;
   prescriber: ExtractedField;
   refills: ExtractedField<number | null>;
   // Reconstitution mix instruction (the only place the diluent volume comes
@@ -233,6 +237,7 @@ export function parsePrescriptionExtraction(
     frequency: parseStringField(obj, "frequency"),
     duration_days: parseNumberField(obj, "duration_days"),
     route: parseStringField(obj, "route"),
+    directions: parseStringField(obj, "directions"),
     prescriber: parseStringField(obj, "prescriber"),
     refills: parseNumberField(obj, "refills"),
     diluent_volume_ml: parseNumberField(obj, "diluent_volume_ml"),

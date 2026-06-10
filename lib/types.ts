@@ -11,6 +11,9 @@ export const ROUTES = [
   "suppository",
   "topical",
   "inhaled",
+  "ophthalmic",
+  "otic",
+  "nasal",
 ] as const;
 export type Route = (typeof ROUTES)[number];
 
@@ -23,6 +26,9 @@ export const ROUTE_LABELS: Record<Route, string> = {
   suppository: "Suppository",
   topical: "Topical",
   inhaled: "Inhaled",
+  ophthalmic: "Ophthalmic (eye)",
+  otic: "Otic (ear)",
+  nasal: "Nasal",
 };
 
 // Map free-text / OCR'd route phrasings (e.g. "by mouth", "sub-Q", "PO") onto a
@@ -48,6 +54,15 @@ export function normaliseRoute(raw: string): Route | null {
     topically: "topical", "on the skin": "topical", "apply to skin": "topical",
     inhalation: "inhaled", "by inhalation": "inhaled", inhale: "inhaled",
     nebulised: "inhaled", nebulized: "inhaled",
+    // Eyes / ears / nose — drops & sprays applied locally (e.g. latanoprost).
+    ophthalmically: "ophthalmic", "in both eyes": "ophthalmic",
+    "in the eye": "ophthalmic", "in the eyes": "ophthalmic", "each eye": "ophthalmic",
+    "both eyes": "ophthalmic", eye: "ophthalmic", eyes: "ophthalmic",
+    ocular: "ophthalmic", intraocular: "ophthalmic",
+    otically: "otic", "in both ears": "otic", "in the ear": "otic",
+    "each ear": "otic", ear: "otic", ears: "otic", aural: "otic",
+    intranasal: "nasal", intranasally: "nasal", "in the nose": "nasal",
+    "each nostril": "nasal", nostril: "nasal", nose: "nasal",
   };
   if (exact[s]) return exact[s];
 
@@ -60,6 +75,11 @@ export function normaliseRoute(raw: string): Route | null {
   if (s.includes("transdermal") || s.includes("patch")) return "transdermal";
   if (s.includes("rectal") || s.includes("suppository")) return "suppository";
   if (s.includes("inhal") || s.includes("nebuli")) return "inhaled";
+  if (s.includes("eye") || s.includes("ophthalm") || s.includes("ocular"))
+    return "ophthalmic";
+  if (s.includes("ear") || s.includes("otic") || s.includes("aural")) return "otic";
+  if (s.includes("nasal") || s.includes("nostril") || s.includes("nose"))
+    return "nasal";
   if (s.includes("topical") || s.includes("skin")) return "topical";
   return null;
 }
@@ -148,7 +168,9 @@ export function guessFormType(opts: {
   if (route === "transdermal") return "patch";
   if (route === "inhaled") return "inhaler";
   if (route === "suppository") return "suppository";
-  if (route === "topical") return "topical";
+  // Drops & sprays (eye/ear/nose) are topical liquids — never an injectable.
+  if (route === "topical" || route === "ophthalmic" || route === "otic" || route === "nasal")
+    return "topical";
   if (route === "sublingual") return "sublingual";
   // Oral or unknown, no liquid concentration ⇒ a solid pill, i.e. a tablet.
   return "tablet";
@@ -168,6 +190,70 @@ export type Frequency =
 
 export const FREQUENCY_UNITS = ["hour", "day", "week", "month"] as const;
 export const FREQUENCY_PERIODS = ["day", "week"] as const;
+
+const WORD_NUMBERS: Record<string, number> = {
+  once: 1, one: 1, a: 1, twice: 2, two: 2, thrice: 3, three: 3, four: 4,
+  five: 5, six: 6,
+};
+
+/**
+ * Parse a free-text cadence phrase (as read off a label) into a structured
+ * Frequency, deterministically — no LLM (rule #8). Returns null when nothing
+ * recognisable matches, so the review screen can leave the picker on a safe
+ * default for the user to set. Cadence ONLY: time-of-day hints like "before
+ * bed" or site hints like "in both eyes" are ignored here and kept verbatim in
+ * Directions instead.
+ */
+export function normaliseFrequency(raw: string): Frequency | null {
+  const s = raw.trim().toLowerCase();
+  if (!s) return null;
+
+  if (/\b(as needed|as required|when needed|prn|p\.r\.n\.)\b/.test(s)) {
+    return { type: "as_needed" };
+  }
+
+  // every other day / alternate days
+  if (/\b(every other day|alternate days?|q\.?o\.?d\.?)\b/.test(s)) {
+    return { type: "every", interval: 2, unit: "day" };
+  }
+
+  // Latin shorthand: qd / bid / tid / qid, and qNh (e.g. q8h).
+  if (/\bq\.?d\.?\b|\bo\.?d\.?\b/.test(s)) return { type: "every", interval: 1, unit: "day" };
+  if (/\bb\.?i\.?d\.?\b/.test(s)) return { type: "times_per", count: 2, period: "day" };
+  if (/\bt\.?i\.?d\.?\b/.test(s)) return { type: "times_per", count: 3, period: "day" };
+  if (/\bq\.?i\.?d\.?\b/.test(s)) return { type: "times_per", count: 4, period: "day" };
+  const qh = s.match(/\bq\.?\s*(\d+)\s*h(ours?)?\b/);
+  if (qh) return { type: "every", interval: Number(qh[1]), unit: "hour" };
+
+  // "every N hours/days/weeks/months" (N is a digit or a word number).
+  const everyN = s.match(
+    /\bevery\s+(\d+|once|one|two|three|a)?\s*(hour|day|week|month)s?\b/
+  );
+  if (everyN) {
+    const n = everyN[1] ? WORD_NUMBERS[everyN[1]] ?? (Number(everyN[1]) || 1) : 1;
+    return { type: "every", interval: n, unit: everyN[2] as "hour" | "day" | "week" | "month" };
+  }
+
+  // "N times (a|per) day/week"
+  const timesPer = s.match(
+    /\b(once|twice|thrice|one|two|three|four|five|six|\d+)\s*(?:times?|x)?\s*(?:a|per|\/)\s*(day|daily|week|weekly)\b/
+  );
+  if (timesPer) {
+    const count = WORD_NUMBERS[timesPer[1]] ?? (Number(timesPer[1]) || 1);
+    const period = timesPer[2].startsWith("week") ? "week" : "day";
+    // Once-per-X reads more naturally as "every 1 X" than "1 time per X".
+    if (count <= 1) return { type: "every", interval: 1, unit: period };
+    return { type: "times_per", count, period };
+  }
+
+  // Bare adverbs: daily / weekly / monthly (and "every day/week/month").
+  if (/\b(daily|every day|each day)\b/.test(s)) return { type: "every", interval: 1, unit: "day" };
+  if (/\b(weekly|every week|each week|once a week)\b/.test(s)) return { type: "every", interval: 1, unit: "week" };
+  if (/\b(monthly|every month|each month|once a month)\b/.test(s)) return { type: "every", interval: 1, unit: "month" };
+  if (/\b(twice (?:a |per )?weekly?)\b/.test(s)) return { type: "times_per", count: 2, period: "week" };
+
+  return null;
+}
 
 // ── Concentration / syringe spec (delivery form jsonb) ──────────────────────
 // For liquids the concentration is an amount per mL (e.g. 200 mg / 1 mL). For

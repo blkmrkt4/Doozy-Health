@@ -95,7 +95,10 @@ export function ExtractionSelect({
   options: readonly { value: string; label: string }[];
   placeholder?: string;
 }) {
-  const style = CONFIDENCE_STYLES[confidence];
+  // An empty value means the AI read *something* but it didn't map to a valid
+  // option (e.g. "in both eyes" with no eye route) — so a "high" badge would lie.
+  // Surface it as low confidence: this field genuinely needs the user's attention.
+  const style = CONFIDENCE_STYLES[value ? confidence : "low"];
 
   return (
     <div>

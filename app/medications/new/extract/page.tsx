@@ -9,11 +9,13 @@ import {
   ROUTES,
   ROUTE_LABELS,
   normaliseRoute,
+  normaliseFrequency,
 } from "@/lib/types";
 import {
   ExtractionField,
   ExtractionSelect,
 } from "@/app/medications/_components/extraction-field";
+import { FrequencyControl } from "@/app/medications/_components/frequency-control";
 import { VialDoseForm } from "@/app/medications/_components/vial-dose-form";
 
 const ROUTE_OPTIONS = ROUTES.map((r) => ({ value: r, label: ROUTE_LABELS[r] }));
@@ -275,6 +277,7 @@ export default async function ExtractionReviewPage({
               <textarea
                 name="directions"
                 rows={2}
+                defaultValue={rx.directions?.value || rx.frequency.value}
                 placeholder="e.g. Take 1 tablet by mouth every morning"
                 className="block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent"
               />
@@ -321,12 +324,21 @@ export default async function ExtractionReviewPage({
                   options={DOSE_UNIT_OPTIONS}
                 />
               </div>
-              <ExtractionField
-                label="Frequency"
-                name="frequency"
-                value={rx.frequency.value}
-                confidence={rx.frequency.confidence}
-              />
+              {/* Structured cadence (drives the daily schedule), seeded from the
+                  sentence the label gave. The full instruction stays in
+                  Directions above. */}
+              <div>
+                <label className="block text-sm text-muted">Frequency</label>
+                <FrequencyControl
+                  prefix="freq"
+                  init={normaliseFrequency(rx.frequency.value)}
+                />
+                {rx.frequency.value ? (
+                  <p className="mt-1 text-xs text-faint">
+                    Read from the label: &ldquo;{rx.frequency.value}&rdquo;
+                  </p>
+                ) : null}
+              </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <ExtractionField
                   label="Duration (days)"
