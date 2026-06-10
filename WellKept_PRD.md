@@ -290,6 +290,14 @@ When the user changes the chosen regimen, the reminder schedule regenerates and 
 - Diary fields appear in the doctor PDF in their own section.
 - v2: integration with Apple Health, Whoop, Oura, Eight Sleep to populate selected fields automatically. v1 is manual.
 
+#### 5.9.1 Diary template library
+
+- A **template** is metadata plus a list of existing-style diary presets — a curated bundle of fields people commonly track for a medication protocol or a wellness goal (`lib/diary-templates.ts`). No new field types and no change to the diary engine: confirming a template just creates ordinary `tracked_fields` rows, medication-scoped when reached from a medication, unscoped when reached from a goal.
+- **Curated, never generated.** Template contents are human-reviewed data with the same discipline as `drug_interactions`; an LLM never drafts template contents at runtime. (This is distinct from §5.9's `suggest_diary_fields`, which suggests individual fields — templates are the fixed, reviewed bundles.)
+- **Surfacing.** When a user adds a medication whose generic name matches a template's `matchTerms`, the template is offered once, dismissibly, on the new-medication view. Goal templates live in a browsable gallery in Settings → Tracking. A patient's `sex`/age (from `patients.sex` / `date_of_birth`) only **orders and filters** which templates are visible — it never auto-selects anything, and gating keys off the *patient*, not the account holder (caregiver model). Nothing is ever applied silently or made mandatory; the user always edits the checklist before confirming.
+- **Cadence.** `tracked_fields.cadence` (`daily` | `periodic`) keeps labs and body measurements off the daily entry form — periodic fields render in a collapsed "Occasional" section and are logged when the user has a result. Core sets are capped at eight fields; scales/booleans are preferred over free text.
+- **Framing (§6.1).** Templates describe what people commonly track and why it's interesting to see over time. They never say "you should monitor X for safety", use no risk language, and never imply the app is screening for adverse events; field names stay neutral.
+
 ### 5.10 PDF export for doctor consultation
 
 - Server-side render (Puppeteer in a serverless function, against a styled React component). Puppeteer is a net-new dependency (§7).

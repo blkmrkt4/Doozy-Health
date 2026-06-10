@@ -327,7 +327,7 @@ export default async function MedicationDetailPage({
   {
     const { data: tfRows } = await supabase
       .from("tracked_fields")
-      .select("id, name, field_type, unit, category_options, display_order")
+      .select("id, name, field_type, unit, category_options, cadence, display_order")
       .eq("patient_id", med.patient_id)
       .eq("active", true)
       .order("display_order");

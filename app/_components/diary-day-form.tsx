@@ -204,6 +204,24 @@ export function DiaryDayForm({
     );
   }
 
+  // Periodic fields (labs, measurements) live in a collapsed "Occasional"
+  // section so empty lab inputs don't clutter the daily list (PRD §5.9.1).
+  const dailyFields = fields.filter((f) => (f.cadence ?? "daily") !== "periodic");
+  const periodicFields = fields.filter((f) => (f.cadence ?? "daily") === "periodic");
+  const renderRow = (field: TrackedField) => {
+    const t = tag(field);
+    return (
+      <div key={field.id} className="space-y-1">
+        <p className="text-sm text-muted">
+          {field.name}
+          {field.unit ? <span className="ml-1 text-xs text-faint">({field.unit})</span> : null}
+          {t ? <span className="ml-2 text-[11px] text-faint">· {t}</span> : null}
+        </p>
+        {control(field)}
+      </div>
+    );
+  };
+
   return (
     <details className="mt-3 rounded-md border border-line">
       <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2 text-sm font-medium text-paper">
@@ -235,19 +253,23 @@ export function DiaryDayForm({
               : "No tracking fields yet. Add some in Settings → Tracking."}
           </p>
         ) : (
-          fields.map((field) => {
-            const t = tag(field);
-            return (
-              <div key={field.id} className="space-y-1">
-                <p className="text-sm text-muted">
-                  {field.name}
-                  {field.unit ? <span className="ml-1 text-xs text-faint">({field.unit})</span> : null}
-                  {t ? <span className="ml-2 text-[11px] text-faint">· {t}</span> : null}
-                </p>
-                {control(field)}
-              </div>
-            );
-          })
+          <>
+            {dailyFields.map(renderRow)}
+            {periodicFields.length > 0 ? (
+              <details className="rounded-md border border-line">
+                <summary className="cursor-pointer list-none px-3 py-2 text-sm text-muted hover:text-paper">
+                  Occasional — labs &amp; measurements
+                </summary>
+                <div className="space-y-4 border-t border-line p-3">
+                  <p className="text-xs text-faint">
+                    Log these when you have a result — they stay off the daily
+                    list.
+                  </p>
+                  {periodicFields.map(renderRow)}
+                </div>
+              </details>
+            ) : null}
+          </>
         )}
 
         {hideNotes ? null : (

@@ -471,7 +471,7 @@ export default async function DashboardPage({
   if (activePatient) {
     const { data: tfRows } = await supabase
       .from("tracked_fields")
-      .select("id, name, field_type, unit, category_options, display_order")
+      .select("id, name, field_type, unit, category_options, cadence, display_order")
       .eq("patient_id", activePatient.id)
       .eq("active", true)
       .order("display_order");
