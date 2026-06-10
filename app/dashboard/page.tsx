@@ -27,6 +27,12 @@ import {
   type Route,
 } from "@/lib/pk/amountInSystem";
 import {
+  projectRunOut,
+  consumedFromLogs,
+  formatRunOut,
+  type RunOut,
+} from "@/lib/supply";
+import {
   isFrequency,
   INJECTABLE_FORM_TYPES,
   type FormType,
@@ -54,8 +60,15 @@ type ChosenRow = {
 
 type DeliveryRow = {
   form_type: string;
-  concentration: { amount: number; per_volume: number } | null;
+  concentration: {
+    amount: number;
+    unit: string;
+    per_volume: number;
+    volume_unit: string;
+  } | null;
   syringe_spec: { capacity_mL?: number } | null;
+  package_count: string | null;
+  package_unit: string | null;
   created_at: string;
 };
 
@@ -154,7 +167,7 @@ export default async function DashboardPage({
   const { data } = await supabase
     .from("medications")
     .select(
-      "id, display_name, canonical_drug_id, is_private, entry_source, created_at, colour, chosen_regimens(dose_amount, dose_unit, frequency, route, active, created_at), delivery_forms(form_type, concentration, syringe_spec, created_at), syringe:inventory_items!medications_syringe_id_fkey(spec)"
+      "id, display_name, canonical_drug_id, is_private, entry_source, created_at, colour, chosen_regimens(dose_amount, dose_unit, frequency, route, active, created_at), delivery_forms(form_type, concentration, syringe_spec, package_count, package_unit, created_at), syringe:inventory_items!medications_syringe_id_fkey(spec)"
     )
     .eq("archived", false)
     .eq("chosen_regimens.active", true)
@@ -235,6 +248,8 @@ export default async function DashboardPage({
   const regimens: MedRegimen[] = [];
   const medNames: Record<string, string> = {};
   const medMeta: Record<string, MedLogMeta> = {};
+  // Per-medication run-out projection for the card (PRD §5.3). Logged-dose based.
+  const runOutByMed = new Map<string, RunOut>();
   for (const m of medications) {
     medNames[m.id] = m.display_name;
     const chosen = (m.chosen_regimens ?? []).find((c) => c.active);
@@ -253,6 +268,36 @@ export default async function DashboardPage({
     const delivery = [...(m.delivery_forms ?? [])].sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     )[0];
+
+    if (delivery?.package_count) {
+      const fillMs = new Date(delivery.created_at).getTime();
+      const consumed = consumedFromLogs(
+        (logRows ?? []).filter(
+          (r) =>
+            r.medication_id === m.id &&
+            (r.event_type === "taken" || r.event_type === "prn") &&
+            r.amount != null &&
+            new Date(r.logged_at).getTime() >= fillMs
+        ),
+        chosen.dose_unit,
+        delivery.package_unit,
+        delivery.concentration
+      );
+      const r = projectRunOut({
+        packageCount: Number(delivery.package_count),
+        packageUnit: delivery.package_unit,
+        concentration: delivery.concentration,
+        regimen: {
+          doseAmount: Number(chosen.dose_amount),
+          doseUnit: chosen.dose_unit,
+          frequency: chosen.frequency,
+        },
+        consumed,
+        now: nowMs,
+      });
+      if (r) runOutByMed.set(m.id, r);
+    }
+
     medMeta[m.id] = {
       medId: m.id,
       name: m.display_name,
@@ -631,6 +676,11 @@ export default async function DashboardPage({
                     {chosen ? (
                       <p className="mt-0.5 tabular text-sm text-muted blur-private">
                         {formatRegimenSummary(chosen)}
+                      </p>
+                    ) : null}
+                    {runOutByMed.has(m.id) ? (
+                      <p className="mt-0.5 text-xs text-faint blur-private">
+                        {formatRunOut(runOutByMed.get(m.id)!, nowMs)}
                       </p>
                     ) : null}
                     <p className="mt-0.5 text-xs text-faint">

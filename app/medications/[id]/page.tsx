@@ -19,6 +19,12 @@ import {
   type DrugPK,
 } from "@/lib/pk/amountInSystem";
 import {
+  projectRunOut,
+  consumedFromLogs,
+  formatRunOut,
+  type RunOut,
+} from "@/lib/supply";
+import {
   FORM_TYPE_LABELS,
   INJECTABLE_FORM_TYPES,
   isFrequency,
@@ -212,6 +218,38 @@ export default async function MedicationDetailPage({
     .eq("medication_id", med.id)
     .eq("event_type", "taken");
   const doseCount = doseCountRaw ?? 0;
+
+  // Supply projection (PRD §5.3): how much is left and roughly when it runs out,
+  // from the package count minus what's actually been logged since this fill.
+  // Logged-dose based, so under/over-dosing moves the date. Estimate only.
+  let runOut: RunOut | null = null;
+  if (delivery?.package_count && chosen && isFrequency(chosen.frequency)) {
+    const { data: supplyLogs } = await supabase
+      .from("dose_logs")
+      .select("amount, unit")
+      .eq("medication_id", med.id)
+      .in("event_type", ["taken", "prn"])
+      .not("amount", "is", null)
+      .gte("logged_at", delivery.created_at);
+    const consumed = consumedFromLogs(
+      supplyLogs ?? [],
+      chosen.dose_unit,
+      delivery.package_unit,
+      delivery.concentration
+    );
+    runOut = projectRunOut({
+      packageCount: Number(delivery.package_count),
+      packageUnit: delivery.package_unit,
+      concentration: delivery.concentration,
+      regimen: {
+        doseAmount: Number(chosen.dose_amount),
+        doseUnit: chosen.dose_unit,
+        frequency: chosen.frequency,
+      },
+      consumed,
+      now: Date.now(),
+    });
+  }
 
   // Single-medication calendar (PRD §5.4): the date-wheel + adherence heatmap
   // for this medication. The grade is a factual record of logged-vs-scheduled.
@@ -476,6 +514,11 @@ export default async function MedicationDetailPage({
           {chosen ? (
             <p className="mt-1 tabular text-sm text-muted blur-private">
               {formatRegimenSummary(chosen)}
+            </p>
+          ) : null}
+          {runOut ? (
+            <p className="mt-1 text-sm text-faint blur-private">
+              {formatRunOut(runOut, Date.now())}
             </p>
           ) : null}
         </div>
