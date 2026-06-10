@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getActivePatient } from "@/lib/active-patient";
 import { llmCall } from "@/lib/llm";
 import { templateById, templateFieldRows } from "@/lib/diary-templates";
+import { isPatientSex } from "@/lib/types";
 
 function str(fd: FormData, key: string): string {
   return (fd.get(key) as string | null)?.trim() ?? "";
@@ -210,6 +211,38 @@ export async function applyTemplate(formData: FormData) {
       ? `/medications/${medicationId}?templated=1`
       : "/settings/tracking?success=Template+applied"
   );
+}
+
+/**
+ * Set the patient's sex / date of birth — used ONLY to order and filter which
+ * diary templates are suggested (never to auto-select anything, never shared).
+ * Owner-only. Keyed to the patient, not the account holder (caregiver model).
+ */
+export async function updatePatientDemographics(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const active = await getActivePatient(supabase);
+  if (!active || active.role !== "owner") fail("Only the owner can edit patient details.");
+
+  const sexRaw = str(formData, "sex");
+  const sex = sexRaw === "" ? null : isPatientSex(sexRaw) ? sexRaw : undefined;
+  if (sex === undefined) fail("Choose a valid option for sex.");
+
+  const dobRaw = str(formData, "date_of_birth");
+  const date_of_birth = dobRaw === "" ? null : dobRaw; // yyyy-mm-dd from <input type=date>
+
+  const { error } = await supabase
+    .from("patients")
+    .update({ sex, date_of_birth })
+    .eq("id", active.id);
+  if (error) fail(`Could not save: ${error.message}`);
+
+  revalidatePath("/settings/tracking");
+  redirect("/settings/tracking?success=Saved");
 }
 
 export async function updateTrackedField(formData: FormData) {

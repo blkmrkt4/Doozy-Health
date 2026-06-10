@@ -6,9 +6,15 @@ import {
   createTrackedField,
   updateTrackedField,
   deleteTrackedField,
+  updatePatientDemographics,
 } from "./actions";
 import { DIARY_PRESETS } from "@/lib/diary-presets";
-import { FIELD_TYPE_LABELS, type FieldType } from "@/lib/types";
+import { FIELD_TYPE_LABELS, type FieldType, type PatientSex } from "@/lib/types";
+import {
+  galleryTemplates,
+  ageFromDob,
+  type DiaryTemplate,
+} from "@/lib/diary-templates";
 import { TrackedFieldForm } from "./tracked-field-form";
 
 // Tracked fields settings page (PRD §5.9, §13.15). Owner-only.
@@ -67,6 +73,26 @@ export default async function TrackingSettingsPage({
     tagsByField.set(r.tracked_field_id, arr);
   }
 
+  // Patient demographics drive which templates are suggested (visibility only).
+  const { data: patient } = await supabase
+    .from("patients")
+    .select("sex, date_of_birth")
+    .eq("id", active.id)
+    .maybeSingle();
+  const sex = (patient?.sex ?? null) as PatientSex | null;
+  const dob = (patient?.date_of_birth ?? null) as string | null;
+  const gallery = galleryTemplates({ sex, age: ageFromDob(dob, Date.now()) });
+  const galleryByKind: Record<DiaryTemplate["kind"], DiaryTemplate[]> = {
+    medication: gallery.filter((t) => t.kind === "medication"),
+    goal: gallery.filter((t) => t.kind === "goal"),
+    care: gallery.filter((t) => t.kind === "care"),
+  };
+  const KIND_TITLES: Record<DiaryTemplate["kind"], string> = {
+    goal: "By goal",
+    medication: "By medication type",
+    care: "Caring for someone",
+  };
+
   // Library grouped in display order, hiding presets already added (by name).
   const existingNames = new Set(
     trackedFields.map((f) => f.name.trim().toLowerCase())
@@ -107,6 +133,90 @@ export default async function TrackingSettingsPage({
             {success}
           </p>
         ) : null}
+
+        {/* Templates gallery — "What are you trying to understand?" Each card
+            opens the select-&-confirm screen (unscoped from here). */}
+        <section className="rounded-md border border-line p-4 space-y-4">
+          <div>
+            <h2 className="text-sm font-medium text-paper">
+              Start from a template
+            </h2>
+            <p className="mt-0.5 text-xs text-faint">
+              Curated sets of fields people commonly track. Pick one to start —
+              you choose what to keep before anything is added.
+            </p>
+          </div>
+
+          {(Object.keys(galleryByKind) as DiaryTemplate["kind"][]).map((kind) => {
+            const items = galleryByKind[kind];
+            if (items.length === 0) return null;
+            return (
+              <div key={kind}>
+                <p className="mb-1 text-[11px] uppercase tracking-wide text-faint">
+                  {KIND_TITLES[kind]}
+                </p>
+                <ul className="grid gap-2 sm:grid-cols-2">
+                  {items.map((t) => (
+                    <li key={t.id}>
+                      <Link
+                        href={`/settings/tracking/templates/${t.id}`}
+                        className="block h-full rounded-md border border-line p-3 transition-colors hover:bg-surface"
+                      >
+                        <p className="text-sm font-medium text-paper">{t.name}</p>
+                        <p className="mt-0.5 text-xs text-faint">{t.description}</p>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+
+          {/* About this patient — sex/age tune which templates show. Optional. */}
+          <details className="rounded-md border border-line">
+            <summary className="cursor-pointer list-none px-3 py-2 text-xs text-accent hover:underline">
+              About this patient — tune which templates show
+            </summary>
+            <form
+              action={updatePatientDemographics}
+              className="space-y-3 border-t border-line p-3"
+            >
+              <p className="text-xs text-faint">
+                Used only to suggest relevant templates — nothing is auto-added,
+                and sex-specific sets stay reachable from the full list either way.
+              </p>
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="text-sm text-muted">
+                  Sex
+                  <select
+                    name="sex"
+                    defaultValue={sex ?? ""}
+                    className="mt-1 block w-40 rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent"
+                  >
+                    <option value="">Prefer not to say</option>
+                    <option value="female">Female</option>
+                    <option value="male">Male</option>
+                  </select>
+                </label>
+                <label className="text-sm text-muted">
+                  Date of birth
+                  <input
+                    type="date"
+                    name="date_of_birth"
+                    defaultValue={dob ?? ""}
+                    className="mt-1 block w-44 rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  className="rounded-md border border-line px-3 py-2 text-sm text-muted transition-colors hover:bg-surface"
+                >
+                  Save
+                </button>
+              </div>
+            </form>
+          </details>
+        </section>
 
         {/* Current fields */}
         <section className="rounded-md border border-line p-4 space-y-3">
