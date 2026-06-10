@@ -4,6 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import { createMedication } from "@/app/medications/actions";
 import { DrugSearch } from "./drug-search";
 import {
+  StatusMark,
+  type RowStatus,
+  type CheckItem,
+  type SetupStatus,
+} from "./setup-status";
+import {
   DILUENTS,
   DOSE_UNITS,
   FORM_TYPES,
@@ -19,142 +25,6 @@ import {
 const inputCls =
   "mt-1 block w-full rounded-md border border-line bg-surface px-3 py-2 text-base text-paper outline-none focus:border-accent";
 const labelCls = "block text-sm text-muted";
-
-type RowStatus = "done" | "todo" | "optional" | "na";
-
-// Status chips read as state, not as another field: a coloured pill with an
-// icon. "done"/"todo" use the semantic ok/danger tokens (so they adapt to the
-// theme); "optional"/"na" stay quiet. Red here is form-validation state (the
-// same family as .alert-error), not the PK chart or adherence calendar.
-const PILL: Record<
-  RowStatus,
-  { label: string; bg: string; text: string; border: string }
-> = {
-  done: {
-    label: "✓ Have it",
-    bg: "var(--color-ok-bg)",
-    text: "var(--color-ok-text)",
-    border: "var(--color-ok-line)",
-  },
-  todo: {
-    label: "✗ Needed",
-    bg: "var(--color-danger-bg)",
-    text: "var(--color-danger-text)",
-    border: "var(--color-danger-line)",
-  },
-  optional: {
-    label: "Optional",
-    bg: "transparent",
-    text: "var(--color-muted)",
-    border: "var(--color-line)",
-  },
-  na: {
-    label: "Not needed",
-    bg: "transparent",
-    text: "var(--color-faint)",
-    border: "transparent",
-  },
-};
-
-/** Status indicator on a checklist row's summary line. */
-function StatusPill({ status }: { status: RowStatus }) {
-  const p = PILL[status];
-  return (
-    <span
-      className="shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-medium"
-      style={{ backgroundColor: p.bg, color: p.text, borderColor: p.border }}
-    >
-      {p.label}
-    </span>
-  );
-}
-
-type CheckItem = {
-  key: string;
-  href: string;
-  label: string;
-  sub: string;
-  status: RowStatus; // done | todo (required, red) | optional (muted)
-};
-
-/** A green tick when we have it; a red cross when it's required and missing;
- *  a muted cross when it's optional and missing. */
-function Mark({ status }: { status: RowStatus }) {
-  const color =
-    status === "done"
-      ? "var(--color-ok-text)"
-      : status === "todo"
-        ? "var(--color-danger-text)"
-        : "var(--color-faint)";
-  return (
-    <span aria-hidden className="text-base leading-none" style={{ color }}>
-      {status === "done" ? "✓" : "✗"}
-    </span>
-  );
-}
-
-/** The at-a-glance list at the top: what THIS product needs, adapting to what
- *  we know so far (no syringe until it reads as an injectable). Each line jumps
- *  to the matching section below. */
-function SetupList({ items, ready }: { items: CheckItem[]; ready: boolean }) {
-  return (
-    <div className="rounded-md border border-line p-4">
-      <p className="text-sm font-medium text-paper">
-        For this medication you&rsquo;ll want
-      </p>
-      <ul className="mt-3 space-y-1">
-        {items.map((it) => {
-          const color =
-            it.status === "done"
-              ? "var(--color-ok-text)"
-              : it.status === "todo"
-                ? "var(--color-danger-text)"
-                : "var(--color-faint)";
-          const word =
-            it.status === "done"
-              ? "Have it"
-              : it.status === "todo"
-                ? "Needed"
-                : "Optional";
-          return (
-            <li key={it.key}>
-              <a
-                href={it.href}
-                className="flex items-center justify-between gap-3 rounded px-1 py-1.5 text-sm hover:bg-surface"
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="text-paper">{it.label}</span>
-                  {it.status !== "done" ? (
-                    <span className="text-faint"> — {it.sub}</span>
-                  ) : null}
-                </span>
-                <span
-                  className="flex shrink-0 items-center gap-1.5"
-                  style={{ color }}
-                >
-                  <span className="text-xs">{word}</span>
-                  <Mark status={it.status} />
-                </span>
-              </a>
-            </li>
-          );
-        })}
-      </ul>
-      <p className="mt-3 border-t border-line pt-3 text-xs">
-        {ready ? (
-          <span style={{ color: "var(--color-ok-text)" }}>
-            ✓ Ready to track — save now and start logging. The rest is optional.
-          </span>
-        ) : (
-          <span className="text-faint">
-            Add a name and the prescription to start logging — the rest is
-            optional, and you can come back for it.
-          </span>
-        )}
-      </p>
-    </div>
-  );
-}
 
 /** One collapsible checklist row: a one-line summary that opens to its inputs.
  *  `id` anchors the row so the summary checklist can jump to it. */
@@ -177,7 +47,7 @@ function Row({
     <details id={id} open={defaultOpen} className="scroll-mt-4 rounded-md border border-line">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm">
         <span className="min-w-0 font-medium text-paper">{title}</span>
-        <StatusPill status={status} />
+        <StatusMark status={status} size={18} />
       </summary>
       <div className="space-y-4 border-t border-line p-4">
         {hint ? <p className="text-xs text-faint">{hint}</p> : null}
@@ -396,6 +266,7 @@ export function MedicationForm({
   cancelHref,
   initial,
   syringes,
+  onStatus,
 }: {
   action?: (formData: FormData) => void | Promise<void>;
   medicationId?: string;
@@ -403,6 +274,9 @@ export function MedicationForm({
   cancelHref?: string;
   initial?: MedicationFormInitial;
   syringes?: { id: string; label: string }[];
+  /** Reports the live setup status up so the page can render the checklist at
+   *  the top, above the scan box. When omitted (edit screen), nothing is sent. */
+  onStatus?: (status: SetupStatus) => void;
 } = {}) {
   const init = initial ?? {};
   const [prescribedFreq, setPrescribedFreq] = useState<FreqType>(
@@ -453,18 +327,17 @@ export function MedicationForm({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(recompute, [formType, choseDiffers]);
 
-  // Only the prescribed regimen is truly required to diarize, so it's the lone
-  // "todo" (red). Everything else is "optional" (muted) until filled — they
-  // sharpen the estimate or the syringe visual but never block logging.
+  // Status tiers (PRD §5.2): red ✕ only for what the app can't work without —
+  // the prescribed regimen. Yellow ! for "works, but better info helps" (the
+  // label's strength, the syringe size, a powder's mix volume). Green ✓ when
+  // done, and it then goes quiet.
   const prescriptionStatus: RowStatus = st.prescription ? "done" : "todo";
   const labelStatus: RowStatus = st.label ? "done" : "optional";
   const syringeStatus: RowStatus = st.syringe ? "done" : "optional";
   const diluentStatus: RowStatus = !st.isRecon ? "na" : st.mixVolume ? "done" : "optional";
 
-  // The bottom line the user actually cares about: do we have enough to start
-  // diarizing this product? The server requires only a name and a complete
-  // prescribed regimen (dose + units + schedule); everything else is optional
-  // and only sharpens the illustrative estimate.
+  // The bottom line: do we have enough to start logging? The server requires
+  // only a name + a complete prescribed regimen; everything else is optional.
   const ready = st.name && st.prescription;
 
   // The at-a-glance list of what THIS product needs. It adapts to what we know:
@@ -476,14 +349,14 @@ export function MedicationForm({
       key: "prescription",
       href: "#row-prescription",
       label: "Prescription or document",
-      sub: "the dose & schedule",
+      context: "Needed to track doses — add the dose and how often.",
       status: prescriptionStatus,
     },
     {
       key: "label",
       href: "#row-label",
-      label: showSyringe ? "Vial — label & strength" : "Bottle or package — its label",
-      sub: "what it is and how strong",
+      label: showSyringe ? "Vial — its label" : "Bottle or package — its label",
+      context: "Works without it — add the strength for a truer chart.",
       status: labelStatus,
     },
   ];
@@ -492,19 +365,32 @@ export function MedicationForm({
       key: "syringe",
       href: "#row-syringe",
       label: "Syringe",
-      sub: "its size in mL",
-      status: st.syringe ? "done" : "optional",
+      context: "Works without it — add the size to show the fill line.",
+      status: syringeStatus,
     });
     if (st.isRecon) {
       checklist.push({
         key: "diluent",
         href: "#row-diluent",
-        label: "Bacteriostatic water",
-        sub: "the mix volume",
-        status: st.mixVolume ? "done" : "optional",
+        label: "Bacteriostatic water for mixing",
+        context: "Add the mix volume — the concentration is worked out from it.",
+        status: diluentStatus,
       });
     }
   }
+
+  // Report status up so the page can render the checklist at the very top. A
+  // signature guard keeps this from looping (parent re-render → same payload).
+  const lastSent = useRef("");
+  useEffect(() => {
+    if (!onStatus) return;
+    const payload: SetupStatus = { items: checklist, ready };
+    const sig = JSON.stringify(payload);
+    if (sig !== lastSent.current) {
+      lastSent.current = sig;
+      onStatus(payload);
+    }
+  });
 
   return (
     <form
@@ -535,10 +421,9 @@ export function MedicationForm({
         </label>
       </div>
 
-      {/* The at-a-glance checklist (what this product needs), then the rows to
-          fill each item in. The list adapts to the delivery form. */}
-      <SetupList items={checklist} ready={ready} />
-
+      {/* The at-a-glance checklist renders at the top of the page (above the
+          scan box) from the status reported via onStatus. Here are the rows to
+          fill each item in. */}
       <p className="px-1 text-xs text-faint">
         Open any item below to fill it in. Add what you have now; you can always
         come back for the rest.
@@ -716,7 +601,7 @@ export function MedicationForm({
       {/* How you take it (chosen). */}
       <Row
         title="How you take it"
-        status={choseDiffers ? "todo" : "na"}
+        status={choseDiffers ? "optional" : "na"}
         hint="Defaults to the prescription — open only if you take it differently."
       >
         <label className="flex items-center gap-2 text-sm text-muted">

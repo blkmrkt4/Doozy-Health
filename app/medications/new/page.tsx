@@ -2,8 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getActivePatient } from "@/lib/active-patient";
-import { MedicationForm } from "./medication-form";
-import { ScanForm } from "./scan-form";
+import { AddMedicationFlow } from "./add-medication-flow";
 
 export default async function NewMedicationPage({
   searchParams,
@@ -46,22 +45,7 @@ export default async function NewMedicationPage({
               </p>
             ) : null}
 
-            <ScanForm />
-
-            {/* ── Divider ───────────────────────────────────────── */}
-            <div className="relative my-8">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-line" />
-              </div>
-              <div className="relative flex justify-center">
-                <span className="bg-ink px-3 text-xs text-faint">
-                  or enter manually
-                </span>
-              </div>
-            </div>
-
-            {/* ── Manual-entry path ─────────────────────────────── */}
-            <MedicationForm />
+            <AddMedicationFlow />
           </>
         )}
       </main>
