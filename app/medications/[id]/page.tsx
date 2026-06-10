@@ -24,6 +24,8 @@ import {
   formatRunOut,
   type RunOut,
 } from "@/lib/supply";
+import { templatesForDrug } from "@/lib/diary-templates";
+import { TemplateSuggestion } from "@/app/medications/_components/template-suggestion";
 import {
   FORM_TYPE_LABELS,
   INJECTABLE_FORM_TYPES,
@@ -479,6 +481,30 @@ export default async function MedicationDetailPage({
     accessories,
   });
 
+  // Diary template suggestion (PRD §5.9.1): right after a medication is added,
+  // if its drug matches a curated template and nothing's been scoped to it yet,
+  // offer that set (dismissible). Matches on the canonical generic name.
+  let suggestedTemplate: { id: string; name: string } | null = null;
+  if (isNew === "1") {
+    let canonicalName: string | null = med.display_name;
+    if (med.canonical_drug_id) {
+      const { data: d } = await supabase
+        .from("drugs")
+        .select("canonical_name")
+        .eq("id", med.canonical_drug_id)
+        .maybeSingle();
+      if (d?.canonical_name) canonicalName = d.canonical_name as string;
+    }
+    const matches = templatesForDrug(canonicalName);
+    if (matches.length > 0) {
+      const { count } = await supabase
+        .from("tracked_field_medications")
+        .select("tracked_field_id", { count: "exact", head: true })
+        .eq("medication_id", med.id);
+      if (!count) suggestedTemplate = { id: matches[0].id, name: matches[0].name };
+    }
+  }
+
   return (
     <div className="min-h-full">
       <header className="border-b border-line">
@@ -581,6 +607,13 @@ export default async function MedicationDetailPage({
           ) : null}
         </div>
 
+        {suggestedTemplate ? (
+          <TemplateSuggestion
+            medicationId={med.id}
+            templateId={suggestedTemplate.id}
+            templateName={suggestedTemplate.name}
+          />
+        ) : null}
 
         {/* Inline modelled-level chart (PRD §5.7). Illustrative, labelled. */}
         {pkSeries ? (
