@@ -21,6 +21,7 @@ import {
   FREQUENCY_UNITS,
   ROUTES,
   normaliseRoute,
+  guessFormType,
   isCountDoseUnit,
   type Concentration,
   type DoseUnit,
@@ -1128,7 +1129,6 @@ export async function confirmPhotoExtraction(formData: FormData) {
   const route =
     inSet(str(formData, "route"), ROUTES) ?? normaliseRoute(str(formData, "route"));
   if (!route) failReview(docId, "Choose a valid route.");
-  const formType = inSet(str(formData, "form_type"), FORM_TYPES) ?? "vial";
 
   // Store the concentration / strength on the delivery form.
   // - Solid oral (tablet/capsule): the per-unit STRENGTH, e.g. 10 mg per 1
@@ -1160,6 +1160,19 @@ export async function confirmPhotoExtraction(formData: FormData) {
       };
     }
   }
+
+  // Infer the delivery form from the route + a real liquid concentration
+  // instead of defaulting to "vial": eye/ear/nose drops and oral pills aren't
+  // injectables. A count-unit "strength" (10 mg per 1 tablet) is NOT a liquid
+  // concentration, so only an mL-based one counts toward the guess.
+  const liquidConc = concentration?.volume_unit === "mL" ? concentration : null;
+  const formType =
+    inSet(str(formData, "form_type"), FORM_TYPES) ??
+    guessFormType({
+      route,
+      concentrationAmount: liquidConc?.amount ?? null,
+      concentrationPerVolume: liquidConc?.per_volume ?? null,
+    });
 
   const reconstitution = buildReconstitution(formData, concentration);
 
