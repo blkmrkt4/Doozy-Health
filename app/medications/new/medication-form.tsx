@@ -360,7 +360,7 @@ export function MedicationForm({
       key: "label",
       href: "#row-label",
       label: "Strength on the label",
-      context: "Optional — makes the modelled chart truer.",
+      context: "Highly recommended for accuracy.",
       status: labelStatus,
     },
   ];
