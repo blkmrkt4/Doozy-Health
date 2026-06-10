@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getActivePatient } from "@/lib/active-patient";
 import { llmCall } from "@/lib/llm";
+import { templateById, templateFieldRows } from "@/lib/diary-templates";
 
 function str(fd: FormData, key: string): string {
   return (fd.get(key) as string | null)?.trim() ?? "";
@@ -106,6 +107,109 @@ export async function createTrackedField(formData: FormData) {
 
   revalidatePath("/settings/tracking");
   redirect("/settings/tracking?success=Field+created");
+}
+
+/**
+ * Apply a diary template (PRD §5.9.1): create the user-selected subset of a
+ * template's fields as ordinary tracked_fields. The field definitions are
+ * re-derived server-side from the curated catalogue (the form only submits which
+ * rows were ticked), so nothing arbitrary can be injected. Med-scoped when a
+ * medication_id is present, otherwise patient-wide. Owner-only; never silent —
+ * this only runs on an explicit confirm. Existing fields (by name) are skipped.
+ */
+export async function applyTemplate(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const active = await getActivePatient(supabase);
+  if (!active || active.role !== "owner") fail("Only the owner can manage fields.");
+
+  const templateId = str(formData, "template_id");
+  const template = templateById(templateId);
+  const medicationId = str(formData, "medication_id") || null;
+  const backTo = medicationId
+    ? `/medications/${medicationId}`
+    : "/settings/tracking";
+  const failHere = (msg: string): never =>
+    redirect(
+      `/settings/tracking/templates/${templateId}${medicationId ? `?medication_id=${medicationId}&` : "?"}error=${encodeURIComponent(msg)}`
+    );
+  if (!template) failHere("That template no longer exists.");
+
+  const rows = templateFieldRows(template!);
+  const selected = [
+    ...new Set(
+      formData
+        .getAll("field")
+        .map((v) => Number(v))
+        .filter((n) => Number.isInteger(n) && n >= 0 && n < rows.length)
+    ),
+  ].sort((a, b) => a - b);
+  if (selected.length === 0) redirect(backTo);
+
+  // Dedup against the patient's existing fields (case-insensitive by name) and
+  // continue the display_order sequence.
+  const { data: existing } = await supabase
+    .from("tracked_fields")
+    .select("name, display_order")
+    .eq("patient_id", active!.id);
+  const seen = new Set(
+    (existing ?? []).map((r) => String(r.name).trim().toLowerCase())
+  );
+  let nextOrder =
+    (existing ?? []).reduce(
+      (mx, r) => Math.max(mx, Number(r.display_order ?? -1)),
+      -1
+    ) + 1;
+
+  const toInsert: Record<string, unknown>[] = [];
+  for (const idx of selected) {
+    const { preset, cadence } = rows[idx];
+    const key = preset.name.trim().toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    toInsert.push({
+      patient_id: active!.id,
+      name: preset.name,
+      field_type: preset.field_type,
+      unit: preset.unit ?? null,
+      category_options: preset.category_options ?? null,
+      cadence,
+      display_order: nextOrder++,
+    });
+  }
+
+  let createdIds: string[] = [];
+  if (toInsert.length > 0) {
+    const { data: created, error } = await supabase
+      .from("tracked_fields")
+      .insert(toInsert)
+      .select("id");
+    if (error) failHere(`Could not apply the template: ${error.message}`);
+    createdIds = (created ?? []).map((r) => r.id as string);
+  }
+
+  // Scope to the medication when reached from one (PRD §5.9).
+  if (medicationId && createdIds.length > 0) {
+    await supabase.from("tracked_field_medications").insert(
+      createdIds.map((tracked_field_id) => ({
+        tracked_field_id,
+        medication_id: medicationId,
+        patient_id: active!.id,
+      }))
+    );
+  }
+
+  revalidatePath("/settings/tracking");
+  if (medicationId) revalidatePath(`/medications/${medicationId}`);
+  redirect(
+    medicationId
+      ? `/medications/${medicationId}?templated=1`
+      : "/settings/tracking?success=Template+applied"
+  );
 }
 
 export async function updateTrackedField(formData: FormData) {
