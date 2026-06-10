@@ -40,9 +40,16 @@ export function ScanForm() {
 
   function clearStaleError() {
     // Clear a leftover message from a previous attempt: the inline one (client
-    // state) and the top-of-page one (the server-rendered ?error= param).
+    // state) and the top-of-page one (the server-rendered ?error= param). Only
+    // navigate when there's actually an ?error= to drop — otherwise replacing on
+    // every added photo re-fetches the page needlessly mid-capture.
     setError(null);
-    router.replace("/medications/new");
+    if (
+      typeof window !== "undefined" &&
+      window.location.search.includes("error=")
+    ) {
+      router.replace("/medications/new");
+    }
   }
 
   function addFiles(list: FileList | null) {
@@ -151,7 +158,7 @@ export function ScanForm() {
                 <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
                 <circle cx="12" cy="13" r="3" />
               </svg>
-              Take photo
+              {files.length > 0 ? "Take another photo" : "Take photo"}
             </button>
             <button
               type="button"
@@ -163,14 +170,23 @@ export function ScanForm() {
             </button>
           </div>
 
-          {/* Multi-photo guidance — same item from several angles, or a
-              powder vial paired with its diluent vial, read together. */}
-          <p className="text-xs text-faint">
-            You can add several photos and we&rsquo;ll read them together — for
-            example, the different sides of a curved label that won&rsquo;t fit in
-            one shot, or a powder vial plus its bacteriostatic-water vial
-            {full ? " (up to 5)" : ""}. A prescription is best scanned on its own.
-          </p>
+          {/* Multi-photo guidance — a wrapped label usually needs several shots;
+              the LLM reads them as one product (see the extract_vial prompt). */}
+          {files.length > 0 ? (
+            <p className="rounded-md border border-line bg-surface p-2.5 text-xs text-muted">
+              <span className="text-paper">Label wraps around the bottle?</span>{" "}
+              Keep going — tap <span className="text-paper">Take another photo</span>{" "}
+              for each part of the label{full ? " (up to 5)" : ""}, then Extract.
+              We&rsquo;ll piece them together into one reading.
+            </p>
+          ) : (
+            <p className="text-xs text-faint">
+              For a round bottle, the label wraps around — take a photo of each
+              part and we&rsquo;ll read them together as one. You can add several;
+              a powder vial plus its water vial works too. A prescription is best
+              scanned on its own.
+            </p>
+          )}
 
           {files.length > 0 ? (
             <button
