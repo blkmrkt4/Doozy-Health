@@ -53,6 +53,7 @@ import {
   disableSchedule,
   runVerification,
   setMedicationPrivacy,
+  updateSupply,
 } from "@/app/medications/actions";
 import { RemoveMedicationControls } from "./_components/remove-medication";
 import {
@@ -516,10 +517,67 @@ export default async function MedicationDetailPage({
               {formatRegimenSummary(chosen)}
             </p>
           ) : null}
-          {runOut ? (
-            <p className="mt-1 text-sm text-faint blur-private">
-              {formatRunOut(runOut, Date.now())}
-            </p>
+          {(runOut || isOwner) && delivery ? (
+            <div className="mt-1">
+              {runOut ? (
+                <p className="text-sm text-faint blur-private">
+                  {formatRunOut(runOut, Date.now())}
+                </p>
+              ) : isOwner ? (
+                <p className="text-xs text-faint">
+                  Add how many you have to see a run-out estimate.
+                </p>
+              ) : null}
+              {isOwner ? (
+                <details className="mt-1">
+                  <summary className="cursor-pointer list-none text-xs text-accent hover:underline">
+                    Update supply · I refilled
+                  </summary>
+                  <form
+                    action={updateSupply}
+                    className="mt-2 flex flex-wrap items-end gap-2"
+                  >
+                    <input type="hidden" name="medication_id" value={med.id} />
+                    <label className="text-xs text-muted">
+                      How many now
+                      <input
+                        type="number"
+                        name="package_count"
+                        min={0}
+                        step="any"
+                        defaultValue={
+                          runOut
+                            ? Math.round(runOut.remaining)
+                            : delivery.package_count ?? ""
+                        }
+                        className="tabular mt-1 block w-28 rounded-md border border-line bg-surface px-2 py-1 text-sm text-paper outline-none focus:border-accent"
+                      />
+                    </label>
+                    <label className="text-xs text-muted">
+                      Unit
+                      <input
+                        type="text"
+                        name="package_unit"
+                        defaultValue={
+                          delivery.package_unit ?? runOut?.packageUnit ?? "tablets"
+                        }
+                        className="mt-1 block w-28 rounded-md border border-line bg-surface px-2 py-1 text-sm text-paper outline-none focus:border-accent"
+                      />
+                    </label>
+                    <button
+                      type="submit"
+                      className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-on-accent transition-opacity hover:opacity-90"
+                    >
+                      Update
+                    </button>
+                  </form>
+                  <p className="mt-1 text-[11px] text-faint">
+                    Resets the count to what you have now — the run-out date
+                    re-bases from here.
+                  </p>
+                </details>
+              ) : null}
+            </div>
           ) : null}
         </div>
 

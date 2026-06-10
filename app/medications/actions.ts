@@ -504,6 +504,75 @@ export async function toggleAccessoryAcknowledged(formData: FormData) {
   redirect(`/medications/${id}`);
 }
 
+/**
+ * Reset the supply on hand (a refill, or a recount). Records a new delivery
+ * form — the sanctioned "new fill" mechanism (PRD §5.2) — copying the current
+ * physical details and setting the new count, with a fresh created_at. Because
+ * the run-out projection anchors on the newest delivery's created_at, this
+ * resets the baseline: consumption is counted only from the refill onward.
+ * Owners only (PRD §5.6).
+ */
+export async function updateSupply(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const medId = str(formData, "medication_id");
+  if (!medId) redirect("/dashboard");
+  const fail = (msg: string): never =>
+    redirect(`/medications/${medId}?error=${encodeURIComponent(msg)}`);
+
+  const { data: med } = await supabase
+    .from("medications")
+    .select("id, patient_id")
+    .eq("id", medId)
+    .maybeSingle();
+  if (!med) fail("Medication not found.");
+
+  const role = await roleForPatient(supabase, med!.patient_id as string);
+  if (role !== "owner") fail("Only the patient owner can update the supply.");
+
+  const count = Number(str(formData, "package_count"));
+  if (!Number.isFinite(count) || count <= 0) {
+    fail("Enter how many you have now (a number greater than zero).");
+  }
+  const unit = str(formData, "package_unit");
+
+  // Copy the current physical details forward; only the count (and the fresh
+  // created_at) change for a same-product refill.
+  const { data: current } = await supabase
+    .from("delivery_forms")
+    .select(
+      "patient_id, form_type, concentration, syringe_spec, reconstitution, package_unit, expiry_date, batch, manufacturer"
+    )
+    .eq("medication_id", medId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!current) fail("This medication has no delivery form to refill.");
+
+  const { error } = await supabase.from("delivery_forms").insert({
+    medication_id: medId,
+    patient_id: current!.patient_id,
+    form_type: current!.form_type,
+    concentration: current!.concentration,
+    syringe_spec: current!.syringe_spec,
+    reconstitution: current!.reconstitution,
+    package_count: count,
+    package_unit: unit || current!.package_unit,
+    expiry_date: current!.expiry_date,
+    batch: current!.batch,
+    manufacturer: current!.manufacturer,
+  });
+  if (error) fail(`Could not update the supply: ${error.message}`);
+
+  revalidatePath(`/medications/${medId}`);
+  revalidatePath("/dashboard");
+  redirect(`/medications/${medId}`);
+}
+
 export async function archiveMedication(formData: FormData) {
   const supabase = await createClient();
   const id = str(formData, "medication_id");
