@@ -344,19 +344,23 @@ export function MedicationForm({
   // a syringe (and a powder's mixing water) only appear once the form reads as
   // an injectable — so a freshly-opened form shows just the document + the
   // container, never a syringe for a pill.
+  // Information-framed, not document-framed: what we need to *know* to start,
+  // and which a prescription OR a bottle/vial label (or typing) can supply —
+  // so neither document is "required" over the other. Only the dose & schedule
+  // is needed to begin; the strength just sharpens the chart.
   const checklist: CheckItem[] = [
     {
       key: "prescription",
       href: "#row-prescription",
-      label: "Prescription or document",
-      context: "Needed to track doses — add the dose and how often.",
+      label: "What to take & how often",
+      context: "Scan a prescription or the bottle label — or type it in.",
       status: prescriptionStatus,
     },
     {
       key: "label",
       href: "#row-label",
-      label: showSyringe ? "Vial — its label" : "Bottle or package — its label",
-      context: "Works without it — add the strength for a truer chart.",
+      label: "Strength on the label",
+      context: "Optional — makes the modelled chart truer.",
       status: labelStatus,
     },
   ];
@@ -364,8 +368,8 @@ export function MedicationForm({
     checklist.push({
       key: "syringe",
       href: "#row-syringe",
-      label: "Syringe",
-      context: "Works without it — add the size to show the fill line.",
+      label: "Syringe — its size in mL",
+      context: "Works without it — shows the fill line.",
       status: syringeStatus,
     });
     if (st.isRecon) {
