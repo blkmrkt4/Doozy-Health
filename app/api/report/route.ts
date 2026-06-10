@@ -20,9 +20,10 @@ export async function POST(req: NextRequest) {
     from?: string;
     to?: string;
     meds?: string;
+    log?: string;
   };
 
-  const { patientId, from, to, meds } = body;
+  const { patientId, from, to, meds, log } = body;
   if (!patientId) {
     return NextResponse.json({ error: "Missing patientId" }, { status: 400 });
   }
@@ -53,6 +54,7 @@ export async function POST(req: NextRequest) {
   const baseUrl = req.nextUrl.origin;
   const params = new URLSearchParams({ from: startDate, to: endDate });
   if (meds) params.set("meds", meds);
+  if (log === "full") params.set("log", "full");
   const reportUrl = `${baseUrl}/report/${patientId}?${params}`;
 
   try {

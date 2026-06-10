@@ -301,17 +301,27 @@ When the user changes the chosen regimen, the reminder schedule regenerates and 
 ### 5.10 PDF export for doctor consultation
 
 - Server-side render (Puppeteer in a serverless function, against a styled React component). Puppeteer is a net-new dependency (§7).
-- Configurable: date range, medications included, diary fields included, log granularity (every dose vs daily summary).
+- Configurable: date range, medications included, diary fields included, log granularity (every dose vs daily summary — the full every-dose table is an **opt-in appendix**, off by default).
 - Contents:
   - Cover page: patient name, date range, generated date, disclaimer footer.
-  - Medication list: each with all three regimen layers and current status.
-  - Dose log table: chronological, per medication.
-  - Diary entries: chronological, with field values.
+  - **Clinical narrative summary (§5.10.1)** — the report leads with this.
+  - Medication list: each with all three regimen layers and current status, a neutral logged-vs-scheduled adherence line, and the pharmacokinetic chart.
+  - Tracked measures: grouped general / by-medication / labs & measurements, each with a chart (not a raw value dump).
   - Pharmacokinetic chart per medication (snapshot at export time).
-  - Appendix: original vial / prescription photos.
+  - Appendix (opt-in): complete chronological dose log; original vial / prescription photos.
 - Branded: ByZyB.ai palette — black background pages where appropriate, electric yellow `#F4EE35` for titles and accents, white body type.
 - Filename pattern: `WellKept — [Patient name] — [start date] to [end date].pdf`.
 - Optional clinician email send (via SES) requires explicit patient consent at the moment of send. Email body is plain, the PDF is the payload.
+
+#### 5.10.1 Clinical narrative summary
+
+The report opens with a factual, readable hand-off a doctor / coach / practitioner can absorb in seconds — not a wall of rows. It answers: what was taken and how consistently, what was tracked, and how the tracked measures moved alongside the medications over the period. The single most important thing it conveys is the **observed relationship between how the person felt (their diary measures over time) and the medications they were taking in the same window** — stated as an observation to discuss with their clinician, never as causation or advice.
+
+- **Deterministic facts first (`lib/report/report-data.ts`).** All numbers are computed in plain TypeScript: per-medication scheduled-vs-logged dose counts, runs of consecutive misses (so a three-week gap reads differently from the occasional missed dose), a coarse consistency label, per-field diary summary stats grouped general / by-medication (via `tracked_field_medications`) / labs (the `periodic` cadence), and a weekly timeline aligning dose counts with numeric-measure means. No number is ever produced by the LLM (hard rule #8).
+- **LLM narrates only (`lib/report/narrative.ts`, prompt `summarize_report_for_clinician`).** The model receives the pre-computed facts and writes observational prose into fixed JSON sections (overview, per-medication, adherence notes, diary observations, correlation observations, data caveats). It invents no numbers, computes no curve or dose, ranks no regimen, and gives no advice (§6.1). This is fuzzy summarisation, the allowed kind of LLM work.
+- **Three safety nets.** A strict prompt; a defensive JSON parse; and a banned-language post-filter mirroring §6.1 (treat / diagnose / prescribe / recommend / "should" + dose, etc.). Any breach — disabled prompt, unparseable output, or banned phrasing — discards the model output and falls back to a **deterministic templated summary** built straight from the facts, so the report always renders and the regulatory line always holds.
+- **Generated once, cached (`report_summaries`).** A "Generate summary" action runs the LLM a single time and stores the parsed sections keyed by patient + date range (membership RLS; owners + caregivers may generate, viewers may not — §5.6). The HTML report and the Puppeteer PDF both read the cache, so the model is never billed twice for the same export. A `facts_hash` lets the UI flag a stale cache; regenerating upserts.
+- Disclaimer footer on the summary section as on every other (§6.1).
 
 ### 5.11 Unit conversion
 
@@ -545,7 +555,7 @@ Global (not patient-scoped), readable only by `is_system_admin = true` via the S
 13. **Caregiver model UI.** Invite flow; `patient_memberships` management; role-based access; private-medication flag; patient switcher. (RLS already in place from step 1.)
 14. **Drug interaction display.** Pairwise check on medication add; `explain_interaction` renders the curated record.
 15. **Diary / custom fields.** Per-patient field config; entry attached to a dose log or free-standing; `suggest_diary_fields` in onboarding.
-16. **PDF export.** Puppeteer server-side render; configurable range / medications / fields; branded layout. (Dep flagged.)
+16. **PDF export.** Puppeteer server-side render; configurable range / medications / fields; branded layout. (Dep flagged.) Includes the cached clinical narrative summary (§5.10.1) — deterministic facts → LLM narration → banned-language-filtered prose, with a deterministic fallback.
 17. **PWA install polish, offline cache, privacy-mode blur, staleness indicators.**
 
 ---

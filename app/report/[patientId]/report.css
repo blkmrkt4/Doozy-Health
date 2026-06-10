@@ -149,6 +149,78 @@
   page-break-inside: avoid;
 }
 
+/* ── Clinical summary ────────────────────────────────────────────────── */
+
+.report-summary p {
+  margin: 0 0 0.6rem;
+  color: #e6e6e6;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.report-summary-label {
+  color: #f4ee35;
+  font-weight: 600;
+}
+
+.report-summary-caveat {
+  color: #999999 !important;
+  font-style: italic;
+}
+
+.report-summary-stamp {
+  color: #777777 !important;
+  font-size: 9px !important;
+}
+
+/* ── Per-medication analysis ─────────────────────────────────────────── */
+
+.report-adherence {
+  margin: 0.5rem 0 0;
+  color: #cccccc;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.report-med-narrative {
+  margin: 0.5rem 0 0;
+  color: #e6e6e6;
+  font-size: 10.5px;
+  line-height: 1.6;
+}
+
+.report-chart {
+  margin-top: 0.75rem;
+}
+
+/* ── Tracked measures ────────────────────────────────────────────────── */
+
+.report-metric-group {
+  margin-bottom: 1.25rem;
+}
+
+.report-metric-heading {
+  font-size: 11px;
+  font-weight: 600;
+  color: #cccccc;
+  margin: 0 0 0.5rem;
+}
+
+.report-metric {
+  margin-bottom: 0.75rem;
+  page-break-inside: avoid;
+}
+
+.report-metric-name {
+  margin: 0 0 0.2rem;
+  font-size: 10px;
+  color: #ffffff;
+}
+
+.report-metric-scope {
+  color: #777777;
+}
+
 /* ── Disclaimer ──────────────────────────────────────────────────────── */
 
 .report-disclaimer {
