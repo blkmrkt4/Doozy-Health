@@ -153,6 +153,13 @@ export default async function ReportPage({
 
   return (
     <div className="report">
+      {/* Screen-only nav back to the export config; hidden in the PDF. */}
+      <nav className="report-nav">
+        <a href="/report" className="report-nav-link">
+          ← Back to WellKept
+        </a>
+      </nav>
+
       {/* ── Cover ──────────────────────────────────────────────── */}
       <section className="report-cover">
         <h1 className="report-title">WellKept</h1>
