@@ -45,27 +45,13 @@ function isVialExtraction(obj: unknown): obj is VialExtraction {
   );
 }
 
-// When the chosen type didn't match the photo, uploadAndExtract re-runs with
-// the correct extractor and passes ?switched=… so we can explain it here rather
-// than having rejected the upload.
-function switchNotice(switched: string | undefined): string | null {
-  if (switched === "vial_to_prescription") {
-    return "You chose Vial / package, but this photo reads as a prescription — so we extracted it as a prescription. Review the details below.";
-  }
-  if (switched === "prescription_to_vial") {
-    return "You chose Prescription, but this photo reads as a vial or package label — so we extracted it as a vial. Review the details below.";
-  }
-  return null;
-}
-
 export default async function ExtractionReviewPage({
   searchParams,
 }: {
-  searchParams: Promise<{ doc?: string; error?: string; switched?: string }>;
+  searchParams: Promise<{ doc?: string; error?: string }>;
 }) {
-  const { doc: docId, error, switched } = await searchParams;
+  const { doc: docId, error } = await searchParams;
   if (!docId) notFound();
-  const switchedNote = switchNotice(switched);
 
   const supabase = await createClient();
   const {
@@ -92,6 +78,11 @@ export default async function ExtractionReviewPage({
   const rx = !isVial
     ? (doc.extracted_json as unknown as PrescriptionExtraction)
     : null;
+
+  // Default unit for the dispensed quantity: liquids are measured in mL, most
+  // scanned scripts are oral solids counted in tablets. The user can correct it.
+  const packageUnitDefault =
+    rx?.dose_unit.value?.trim().toLowerCase() === "ml" ? "mL" : "tablets";
 
   // Generate signed URL for the thumbnail.
   const { data: signed } = await supabase.storage
@@ -121,12 +112,6 @@ export default async function ExtractionReviewPage({
           Check each field below. Edit anything the AI got wrong, then confirm
           to create the medication.
         </p>
-
-        {switchedNote ? (
-          <p className="mt-4 rounded-md border border-accent/40 bg-surface p-3 text-sm text-muted">
-            {switchedNote}
-          </p>
-        ) : null}
 
         {error ? (
           <p className="mt-4 rounded-md border alert-error p-3 text-sm">
@@ -354,6 +339,36 @@ export default async function ExtractionReviewPage({
                   confidence={rx.refills.confidence}
                   type="number"
                 />
+              </div>
+            </fieldset>
+
+            <fieldset className="space-y-2 rounded-md border border-line p-4">
+              <legend className="text-sm font-medium text-paper">Supply</legend>
+              <p className="text-xs text-faint">
+                How much is in the package (e.g. 90 tablets). Used to estimate
+                when you&rsquo;ll run out as you log doses.
+              </p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <ExtractionField
+                  label="Quantity dispensed"
+                  name="package_count"
+                  value={String(rx.quantity_dispensed?.value ?? "")}
+                  confidence={rx.quantity_dispensed?.confidence ?? "low"}
+                  type="number"
+                  step="any"
+                />
+                <div>
+                  <label htmlFor="package_unit" className="block text-sm text-muted">
+                    Unit
+                  </label>
+                  <input
+                    id="package_unit"
+                    name="package_unit"
+                    defaultValue={packageUnitDefault}
+                    placeholder="e.g. tablets, mL"
+                    className="mt-1 block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent"
+                  />
+                </div>
               </div>
             </fieldset>
 

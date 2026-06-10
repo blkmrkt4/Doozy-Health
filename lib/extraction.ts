@@ -65,6 +65,9 @@ export type PrescriptionExtraction = {
   // per day before bed"). frequency carries only the structured cadence; the
   // rest of the sentence (time of day, site) is kept here for Directions.
   directions: ExtractedField;
+  // Quantity dispensed in the package, e.g. "90 TAB" → 90. Seeds the supply
+  // count so we can later project a run-out date. Null if not printed.
+  quantity_dispensed: ExtractedField<number | null>;
   prescriber: ExtractedField;
   refills: ExtractedField<number | null>;
   // Reconstitution mix instruction (the only place the diluent volume comes
@@ -238,6 +241,7 @@ export function parsePrescriptionExtraction(
     duration_days: parseNumberField(obj, "duration_days"),
     route: parseStringField(obj, "route"),
     directions: parseStringField(obj, "directions"),
+    quantity_dispensed: parseNumberField(obj, "quantity_dispensed"),
     prescriber: parseStringField(obj, "prescriber"),
     refills: parseNumberField(obj, "refills"),
     diluent_volume_ml: parseNumberField(obj, "diluent_volume_ml"),

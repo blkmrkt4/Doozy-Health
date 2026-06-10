@@ -1197,6 +1197,8 @@ export async function confirmPhotoExtraction(formData: FormData) {
         form_type: formType,
         ...(concentration ? { concentration } : {}),
         ...(reconstitution ? { reconstitution } : {}),
+        package_count: str(formData, "package_count"),
+        package_unit: str(formData, "package_unit"),
         expiry_date: str(formData, "expiry_date"),
         batch: str(formData, "batch"),
         manufacturer: str(formData, "manufacturer"),
