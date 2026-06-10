@@ -69,38 +69,114 @@ function StatusPill({ status }: { status: RowStatus }) {
   );
 }
 
+type CheckItem = {
+  key: string;
+  href: string;
+  label: string;
+  sub: string;
+  status: RowStatus; // done | todo (required, red) | optional (muted)
+};
+
+/** A green tick when we have it; a red cross when it's required and missing;
+ *  a muted cross when it's optional and missing. */
+function Mark({ status }: { status: RowStatus }) {
+  const color =
+    status === "done"
+      ? "var(--color-ok-text)"
+      : status === "todo"
+        ? "var(--color-danger-text)"
+        : "var(--color-faint)";
+  return (
+    <span aria-hidden className="text-base leading-none" style={{ color }}>
+      {status === "done" ? "✓" : "✗"}
+    </span>
+  );
+}
+
+/** The at-a-glance list at the top: what THIS product needs, adapting to what
+ *  we know so far (no syringe until it reads as an injectable). Each line jumps
+ *  to the matching section below. */
+function SetupList({ items, ready }: { items: CheckItem[]; ready: boolean }) {
+  return (
+    <div className="rounded-md border border-line p-4">
+      <p className="text-sm font-medium text-paper">
+        For this medication you&rsquo;ll want
+      </p>
+      <ul className="mt-3 space-y-1">
+        {items.map((it) => {
+          const color =
+            it.status === "done"
+              ? "var(--color-ok-text)"
+              : it.status === "todo"
+                ? "var(--color-danger-text)"
+                : "var(--color-faint)";
+          const word =
+            it.status === "done"
+              ? "Have it"
+              : it.status === "todo"
+                ? "Needed"
+                : "Optional";
+          return (
+            <li key={it.key}>
+              <a
+                href={it.href}
+                className="flex items-center justify-between gap-3 rounded px-1 py-1.5 text-sm hover:bg-surface"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="text-paper">{it.label}</span>
+                  {it.status !== "done" ? (
+                    <span className="text-faint"> — {it.sub}</span>
+                  ) : null}
+                </span>
+                <span
+                  className="flex shrink-0 items-center gap-1.5"
+                  style={{ color }}
+                >
+                  <span className="text-xs">{word}</span>
+                  <Mark status={it.status} />
+                </span>
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="mt-3 border-t border-line pt-3 text-xs">
+        {ready ? (
+          <span style={{ color: "var(--color-ok-text)" }}>
+            ✓ Ready to track — save now and start logging. The rest is optional.
+          </span>
+        ) : (
+          <span className="text-faint">
+            Add a name and the prescription to start logging — the rest is
+            optional, and you can come back for it.
+          </span>
+        )}
+      </p>
+    </div>
+  );
+}
+
 /** One collapsible checklist row: a one-line summary that opens to its inputs.
- *  `missing` names the single critical thing a partly-filled row still needs
- *  (e.g. a syringe's size), shown as a sub-point under the title. */
+ *  `id` anchors the row so the summary checklist can jump to it. */
 function Row({
+  id,
   title,
   status,
   defaultOpen,
   hint,
-  missing,
   children,
 }: {
+  id?: string;
   title: string;
   status: RowStatus;
   defaultOpen?: boolean;
   hint?: string;
-  missing?: string;
   children: React.ReactNode;
 }) {
   return (
-    <details open={defaultOpen} className="rounded-md border border-line">
+    <details id={id} open={defaultOpen} className="scroll-mt-4 rounded-md border border-line">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm">
-        <span className="min-w-0">
-          <span className="font-medium text-paper">{title}</span>
-          {missing && status === "todo" ? (
-            <span
-              className="mt-0.5 block text-xs"
-              style={{ color: "var(--color-danger-text)" }}
-            >
-              Still needs: {missing}
-            </span>
-          ) : null}
-        </span>
+        <span className="min-w-0 font-medium text-paper">{title}</span>
         <StatusPill status={status} />
       </summary>
       <div className="space-y-4 border-t border-line p-4">
@@ -377,16 +453,58 @@ export function MedicationForm({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(recompute, [formType, choseDiffers]);
 
+  // Only the prescribed regimen is truly required to diarize, so it's the lone
+  // "todo" (red). Everything else is "optional" (muted) until filled — they
+  // sharpen the estimate or the syringe visual but never block logging.
   const prescriptionStatus: RowStatus = st.prescription ? "done" : "todo";
   const labelStatus: RowStatus = st.label ? "done" : "optional";
-  const syringeStatus: RowStatus = st.syringe ? "done" : "todo";
-  const diluentStatus: RowStatus = !st.isRecon ? "na" : st.mixVolume ? "done" : "todo";
+  const syringeStatus: RowStatus = st.syringe ? "done" : "optional";
+  const diluentStatus: RowStatus = !st.isRecon ? "na" : st.mixVolume ? "done" : "optional";
 
   // The bottom line the user actually cares about: do we have enough to start
   // diarizing this product? The server requires only a name and a complete
   // prescribed regimen (dose + units + schedule); everything else is optional
   // and only sharpens the illustrative estimate.
   const ready = st.name && st.prescription;
+
+  // The at-a-glance list of what THIS product needs. It adapts to what we know:
+  // a syringe (and a powder's mixing water) only appear once the form reads as
+  // an injectable — so a freshly-opened form shows just the document + the
+  // container, never a syringe for a pill.
+  const checklist: CheckItem[] = [
+    {
+      key: "prescription",
+      href: "#row-prescription",
+      label: "Prescription or document",
+      sub: "the dose & schedule",
+      status: prescriptionStatus,
+    },
+    {
+      key: "label",
+      href: "#row-label",
+      label: showSyringe ? "Vial — label & strength" : "Bottle or package — its label",
+      sub: "what it is and how strong",
+      status: labelStatus,
+    },
+  ];
+  if (showSyringe) {
+    checklist.push({
+      key: "syringe",
+      href: "#row-syringe",
+      label: "Syringe",
+      sub: "its size in mL",
+      status: st.syringe ? "done" : "optional",
+    });
+    if (st.isRecon) {
+      checklist.push({
+        key: "diluent",
+        href: "#row-diluent",
+        label: "Bacteriostatic water",
+        sub: "the mix volume",
+        status: st.mixVolume ? "done" : "optional",
+      });
+    }
+  }
 
   return (
     <form
@@ -417,35 +535,18 @@ export function MedicationForm({
         </label>
       </div>
 
-      <p className="px-1 text-xs text-faint">
-        Each component below is its own line — open one to fill it in. Add what
-        you have now; you can always come back for the rest.
-      </p>
+      {/* The at-a-glance checklist (what this product needs), then the rows to
+          fill each item in. The list adapts to the delivery form. */}
+      <SetupList items={checklist} ready={ready} />
 
-      {/* Bottom-line readiness: can we start diarizing yet? Green once the one
-          required component (the prescribed regimen) is in; neutral guidance
-          otherwise — not an error, just what's left to start. */}
-      {ready ? (
-        <div className="rounded-md border alert-success px-4 py-3 text-sm">
-          <span className="font-medium">Ready to track.</span> You can save now
-          and start logging doses. Everything below is optional — it just
-          sharpens the estimate.
-        </div>
-      ) : (
-        <div
-          className="rounded-md border px-4 py-3 text-sm"
-          style={{ borderColor: "var(--color-line)", color: "var(--color-muted)" }}
-        >
-          <span className="font-medium text-paper">Almost there.</span> To start
-          tracking, add {st.name ? "" : "the medication name and "}the dose
-          &amp; schedule under{" "}
-          <span className="text-paper">Prescription</span>. Everything else is
-          optional.
-        </div>
-      )}
+      <p className="px-1 text-xs text-faint">
+        Open any item below to fill it in. Add what you have now; you can always
+        come back for the rest.
+      </p>
 
       {/* Prescription */}
       <Row
+        id="row-prescription"
         title="Prescription — dose, units & schedule"
         status={prescriptionStatus}
         defaultOpen
@@ -481,6 +582,7 @@ export function MedicationForm({
 
       {/* Medication label — form + strength */}
       <Row
+        id="row-label"
         title="Medication label — form & strength"
         status={labelStatus}
         hint="The physical thing — pick the form, and its strength if you have it."
@@ -545,6 +647,7 @@ export function MedicationForm({
       {/* Reconstitution — injectables only (a powder is mixed before use). */}
       {showSyringe ? (
         <Row
+          id="row-diluent"
           title="Reconstitution — powder + diluent"
           status={diluentStatus}
           hint="Only if this vial is a powder you mix before use (e.g. hCG, a peptide)."
@@ -571,9 +674,9 @@ export function MedicationForm({
       {/* Syringe — injectables only. */}
       {showSyringe ? (
         <Row
+          id="row-syringe"
           title="Syringe"
           status={syringeStatus}
-          missing="the syringe size (mL)"
           hint="Pick the syringe you'll use (or add one) — its size shows the fill line."
         >
           <label className={labelCls}>
