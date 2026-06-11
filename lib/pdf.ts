@@ -1,10 +1,44 @@
 import "server-only";
 import puppeteer from "puppeteer-core";
 
-// PDF renderer via Puppeteer (PRD §5.10, §13.16). Uses puppeteer-core
-// (~2MB npm, no bundled Chromium) — expects Chromium in the deployment
-// environment. Dependency: puppeteer-core. Alternative: @react-pdf/renderer
-// (~2MB, own styling DSL, less CSS fidelity). CLAUDE.md rule #13 flagged.
+// PDF renderer via Puppeteer (PRD §5.10, §13.16). Headless Chrome doesn't ship
+// in a serverless runtime, so on Vercel/Lambda we load a serverless-built
+// Chromium from @sparticuz/chromium; locally (or any box with a real Chrome) we
+// use the system binary at CHROMIUM_PATH.
+//
+// Dependencies: puppeteer-core (~2MB, no bundled Chromium) + @sparticuz/chromium
+// (~50MB brotli binary that unpacks to /tmp at runtime) — the standard way to
+// run headless Chrome in a Vercel function. Its Chromium build (149) matches
+// puppeteer-core 25's expected revision. Alternative considered: a hosted
+// browser API (e.g. Browserless), rejected to avoid shipping report HTML to a
+// third party and a recurring cost (CLAUDE.md rule #13).
+
+const isServerless = Boolean(
+  process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME
+);
+
+async function launchBrowser() {
+  if (isServerless) {
+    // Loaded lazily so local/dev never pulls the big binary into the bundle.
+    const chromium = (await import("@sparticuz/chromium")).default;
+    // A PDF render needs no WebGL; disabling the graphics stack skips unpacking
+    // the swiftshader blob, so it cold-starts faster and lighter.
+    chromium.setGraphicsMode = false;
+    return puppeteer.launch({
+      args: chromium.args,
+      executablePath: await chromium.executablePath(),
+      headless: true,
+    });
+  }
+
+  // Local / self-hosted: use the system Chrome/Chromium.
+  const executablePath = process.env.CHROMIUM_PATH ?? "/usr/bin/chromium-browser";
+  return puppeteer.launch({
+    executablePath,
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+  });
+}
 
 /**
  * Render a URL to a PDF buffer using headless Chromium.
@@ -17,21 +51,7 @@ export async function renderPdf(
     cookie?: string;
   }
 ): Promise<Buffer> {
-  // In production, use the Chromium binary available in the environment.
-  // Common paths: /usr/bin/chromium-browser (Alpine), /usr/bin/google-chrome.
-  const executablePath =
-    process.env.CHROMIUM_PATH ??
-    "/usr/bin/chromium-browser";
-
-  const browser = await puppeteer.launch({
-    executablePath,
-    headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-    ],
-  });
+  const browser = await launchBrowser();
 
   try {
     const page = await browser.newPage();

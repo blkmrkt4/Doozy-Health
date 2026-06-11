@@ -5,6 +5,11 @@ import { renderPdf } from "@/lib/pdf";
 // PDF generation endpoint (PRD §5.10, §13.16). Renders the report page via
 // Puppeteer and returns the PDF as a downloadable file.
 
+// Serverless Chromium needs the Node runtime (not edge) and time to cold-start,
+// unpack the binary, and render. Memory is set in vercel.json.
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
   const {
