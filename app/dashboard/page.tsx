@@ -11,6 +11,7 @@ import { formatRegimenSummary, relativeAge } from "@/lib/format";
 import { PatientSwitcher } from "@/app/_components/patient-switcher";
 import { CalendarSection } from "@/app/_components/calendar-section";
 import { MedTimeline } from "@/app/_components/med-timeline";
+import { ChartsToggle } from "@/app/_components/charts-toggle";
 import {
   buildWheelModel,
   type MedRegimen,
@@ -599,7 +600,10 @@ export default async function DashboardPage({
         ) : null}
 
         <section className="flex items-center justify-between">
-          <h1 className="text-sm font-medium text-muted">Medications</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-sm font-medium text-muted">Medications</h1>
+            <ChartsToggle />
+          </div>
           {isOwner ? (
             <div className="flex items-center gap-2">
               <Link

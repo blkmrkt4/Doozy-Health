@@ -112,6 +112,13 @@ body {
   transition: filter 0.2s ease;
 }
 
+/* Dashboard "graphs on/off" toggle. When the body has .med-charts-hidden, the
+   amount-in-system PK curve on each medication card is hidden; the calendar
+   wheel, dose logging, and diary stay. A personal view preference. */
+.med-charts-hidden .med-amount-chart {
+  display: none;
+}
+
 /* Staleness amber dot (PRD §9). Neutral marker for medications not
    logged recently. Never accusatory. */
 .stale-dot {

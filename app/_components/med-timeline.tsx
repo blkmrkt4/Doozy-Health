@@ -57,7 +57,9 @@ export function MedTimeline({
         }}
         onScrub={(ms) => setCursorMs(ms)}
       />
-      <AmountInSystemChart {...chart} cursorDate={new Date(cursorMs)} />
+      <div className="med-amount-chart">
+        <AmountInSystemChart {...chart} cursorDate={new Date(cursorMs)} />
+      </div>
       {diaryFields ? (
         <DiaryDayForm
           dayDate={selectedKey}
