@@ -93,6 +93,7 @@ const facts: ReportFacts = {
       },
     },
   ],
+  adhocMeds: [],
   diaryMetrics: [
     {
       name: "Energy",

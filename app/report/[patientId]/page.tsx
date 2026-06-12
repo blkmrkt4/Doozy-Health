@@ -239,10 +239,10 @@ export default async function ReportPage({
       {/* ── Medications ────────────────────────────────────────── */}
       <section className="report-section">
         <h2 className="report-heading">Medications</h2>
-        {data.rows.medications.length === 0 ? (
+        {data.rows.medications.filter((m) => !m.single_use).length === 0 ? (
           <p className="report-empty">No medications in this period.</p>
         ) : (
-          data.rows.medications.map((m) => {
+          data.rows.medications.filter((m) => !m.single_use).map((m) => {
             const prescribed = (m.prescribed_regimens ?? [])[0];
             const delivery = (m.delivery_forms ?? [])[0];
             const chosen = (m.chosen_regimens ?? []).find((c) => c.active);
@@ -331,6 +331,29 @@ export default async function ReportPage({
         )}
         <p className="report-disclaimer">{DISCLAIMER}</p>
       </section>
+
+      {/* ── One-off / OTC medications ──────────────────────────── */}
+      {data.facts.adhocMeds.length > 0 ? (
+        <section className="report-section">
+          <h2 className="report-heading">One-off / OTC medications</h2>
+          <p className="report-interactions-intro">
+            Logged as taken once or occasionally, outside the regular regimen.
+          </p>
+          <table className="report-table">
+            <tbody>
+              {data.facts.adhocMeds.map((a, i) => (
+                <tr key={i}>
+                  <td className="report-label">{a.name}</td>
+                  <td>
+                    taken {a.doseCount}×{a.dates.length > 0 ? ` · ${a.dates.join(", ")}` : ""}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="report-disclaimer">{DISCLAIMER}</p>
+        </section>
+      ) : null}
 
       {/* ── Interactions to discuss (curated; rule #9) ─────────── */}
       {data.facts.interactions.length > 0 ? (

@@ -184,9 +184,16 @@ export function buildFallbackNarrative(facts: ReportFacts): ClinicalNarrative {
       ? `A ${facts.patient.ageYears}-year-old${facts.patient.sex ? ` ${facts.patient.sex}` : ""} patient`
       : "The patient";
 
+  const adhoc =
+    facts.adhocMeds.length > 0
+      ? ` One-off medications were also logged: ${facts.adhocMeds
+          .map((a) => `${a.name} (${a.doseCount}×)`)
+          .join(", ")}.`
+      : "";
+
   const overview =
     `${who} logged ${medCount} medication${medCount === 1 ? "" : "s"} over ${facts.period.days} days. ` +
-    `This summary reflects only what was recorded in the wellness diary.`;
+    `This summary reflects only what was recorded in the wellness diary.${adhoc}`;
 
   const medications: NarrativeMedication[] = facts.medications.map((m) => ({
     name: m.name,

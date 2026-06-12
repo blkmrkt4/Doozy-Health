@@ -131,6 +131,18 @@ export function renderReportText(opts: {
     }
   }
 
+  // ── One-off / OTC medications ──────────────────────────────────────────────
+  if (facts.adhocMeds.length > 0) {
+    out.push(RULE, "ONE-OFF / OTC MEDICATIONS", RULE);
+    for (const a of facts.adhocMeds) {
+      out.push(
+        `${a.name}: taken ${a.doseCount}×` +
+          (a.dates.length > 0 ? ` (${a.dates.join(", ")})` : "")
+      );
+    }
+    out.push("");
+  }
+
   // ── Interactions to discuss (curated; rule #9) ─────────────────────────────
   if (facts.interactions.length > 0) {
     out.push(RULE, "INTERACTIONS TO DISCUSS", RULE);

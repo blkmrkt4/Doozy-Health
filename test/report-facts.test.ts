@@ -217,4 +217,30 @@ describe("computeReportFacts", () => {
     expect(alcohol.isSubstance).toBe(true);
     expect(alcohol.substanceName).toBe("alcohol");
   });
+
+  it("separates single-use (OTC) meds into adhocMeds, out of the regimen list", () => {
+    const r = rows({
+      medications: [
+        {
+          id: "med-otc",
+          display_name: "Tylenol",
+          canonical_drug_id: null,
+          colour: null,
+          single_use: true,
+          prescribed_regimens: null,
+          delivery_forms: null,
+          chosen_regimens: null,
+        },
+      ],
+      doseLogs: [
+        { medication_id: "med-otc", event_type: "prn", logged_at: `${from}T09:00:00`, amount: "500", unit: "mg", route_taken: "oral", site: null, note: null },
+        { medication_id: "med-otc", event_type: "prn", logged_at: `2026-05-20T09:00:00`, amount: "500", unit: "mg", route_taken: "oral", site: null, note: null },
+      ],
+    });
+    const { facts } = computeReportFacts(r, from, to);
+    expect(facts.medications).toHaveLength(0);
+    expect(facts.adhocMeds).toHaveLength(1);
+    expect(facts.adhocMeds[0].name).toBe("Tylenol");
+    expect(facts.adhocMeds[0].doseCount).toBe(2);
+  });
 });

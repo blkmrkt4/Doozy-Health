@@ -39,6 +39,7 @@ const data = {
         },
       },
     ],
+    adhocMeds: [],
     diaryMetrics: [
       {
         name: "Energy",

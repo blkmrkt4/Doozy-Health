@@ -12,6 +12,7 @@ import { PatientSwitcher } from "@/app/_components/patient-switcher";
 import { CalendarSection } from "@/app/_components/calendar-section";
 import { MedTimeline } from "@/app/_components/med-timeline";
 import { ChartsToggle } from "@/app/_components/charts-toggle";
+import { QuickLogOtc } from "@/app/_components/quick-log-otc";
 import {
   buildWheelModel,
   type MedRegimen,
@@ -171,6 +172,7 @@ export default async function DashboardPage({
       "id, display_name, canonical_drug_id, is_private, entry_source, created_at, colour, chosen_regimens(dose_amount, dose_unit, frequency, route, active, created_at), delivery_forms(form_type, concentration, syringe_spec, package_count, package_unit, created_at), syringe:inventory_items!medications_syringe_id_fkey(spec)"
     )
     .eq("archived", false)
+    .eq("single_use", false) // one-off OTC logs aren't regimen cards
     .eq("chosen_regimens.active", true)
     .order("created_at", { ascending: false });
 
@@ -744,6 +746,13 @@ export default async function DashboardPage({
             })}
           </ul>
         )}
+
+        {/* Quick-log a one-off / OTC medication (PRD §5.10.1 Phase B). */}
+        {canLog ? (
+          <div className="mt-3">
+            <QuickLogOtc />
+          </div>
+        ) : null}
 
         {/* Inventory — supplies on hand (syringes). A disclosure twisty per item
             (PRD §5.1). Owners can remove. */}

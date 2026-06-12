@@ -1651,3 +1651,56 @@ export async function explainInteractionAction(
 
   return explainInteraction(drugA, drugB, mechanism, severity);
 }
+
+// ── Single-use / OTC dose logging (PRD §5.10.1 Phase B) ─────────────────────
+
+export type LogOneOffResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Record a one-off, not-in-inventory medication (Tylenol, ibuprofen, NyQuil).
+ * Resolves the canonical drug (brand→generic via lookup_drug_pk) so it feeds the
+ * curated interaction check + the Snapshot, then the SECURITY DEFINER RPC
+ * find-or-creates a `single_use` medication row and inserts a PRN dose log.
+ * Owners and caregivers may log; viewers cannot (enforced again in the RPC).
+ */
+export async function logSingleUseDose(formData: FormData): Promise<LogOneOffResult> {
+  const supabase = await createClient();
+  const active = await getActivePatient(supabase);
+  if (!active) return { ok: false, error: "No active patient." };
+  if (active.role === "viewer") return { ok: false, error: "Viewers cannot log doses." };
+
+  const name = str(formData, "name");
+  if (!name) return { ok: false, error: "Enter a medication name." };
+
+  const amountRaw = str(formData, "amount");
+  const amount = Number(amountRaw);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { ok: false, error: "Enter a dose amount." };
+  }
+  const unit = inSet(str(formData, "unit"), DOSE_UNITS);
+  if (!unit) return { ok: false, error: "Choose a unit." };
+
+  const route = normaliseRoute(str(formData, "route")) ?? "oral";
+  const note = str(formData, "note") || null;
+  const loggedAtRaw = str(formData, "logged_at");
+  const loggedAt = loggedAtRaw ? new Date(loggedAtRaw).toISOString() : null;
+
+  // Resolve a canonical drug so interactions can be checked (best-effort; a null
+  // result just means no interaction match / no PK chart — never blocks logging).
+  const canonicalDrugId = await resolveOrCreateCanonicalDrug({ name, route });
+
+  const { error } = await supabase.rpc("log_single_use_dose", {
+    p_patient_id: active.id,
+    p_display_name: name,
+    p_canonical_drug_id: canonicalDrugId,
+    p_amount: amountRaw,
+    p_unit: unit,
+    p_route: route,
+    p_note: note,
+    p_logged_at: loggedAt,
+  });
+  if (error) return { ok: false, error: "Could not log this medication. Please try again." };
+
+  revalidatePath("/dashboard");
+  return { ok: true };
+}

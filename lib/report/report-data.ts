@@ -33,6 +33,7 @@ export type MedicationRow = {
   display_name: string;
   canonical_drug_id: string | null;
   colour: string | null;
+  single_use?: boolean;
   prescribed_regimens:
     | {
         dose_amount: string;
@@ -184,10 +185,19 @@ export type TimelineWeek = {
   metrics: Record<string, number>;
 };
 
+/** A one-off / OTC medication logged in the period (PRD §5.10.1 Phase B). */
+export type AdhocMedFacts = {
+  name: string;
+  doseCount: number;
+  dates: string[];
+};
+
 export type ReportFacts = {
   period: { from: string; to: string; days: number };
   patient: { ageYears?: number; sex?: string };
   medications: MedicationFacts[];
+  /** one-off / OTC medications taken in the period (not regimen meds). */
+  adhocMeds: AdhocMedFacts[];
   diaryMetrics: DiaryMetricFacts[];
   timeline: TimelineWeek[];
   /** Curated drug/substance interactions among the in-scope drug set (rule #9 —
@@ -455,10 +465,22 @@ export function computeReportFacts(
     }
   }
 
+  // One-off / OTC meds are kept separate from regimen medications.
+  const regularMeds = rows.medications.filter((m) => !m.single_use);
+  const adhocMeds: AdhocMedFacts[] = rows.medications
+    .filter((m) => m.single_use)
+    .map((m) => {
+      const ts = takenByMed.get(m.id) ?? [];
+      if (ts.length === 0) return null;
+      const dates = Array.from(new Set(ts.map((t) => dayKey(t)))).sort();
+      return { name: m.display_name, doseCount: ts.length, dates: dates.slice(0, 8) };
+    })
+    .filter((x): x is AdhocMedFacts => x !== null);
+
   // ── Per-medication facts ───────────────────────────────────────────────────
   const medAdherence = new Map<string, AdherenceFacts>();
   const medOverDose = new Map<string, OverDoseFacts>();
-  const medications: MedicationFacts[] = rows.medications.map((m) => {
+  const medications: MedicationFacts[] = regularMeds.map((m) => {
     const chosen = activeChosen(m);
     const prescribed = (m.prescribed_regimens ?? [])[0] ?? null;
     const taken = takenByMed.get(m.id) ?? [];
@@ -685,6 +707,7 @@ export function computeReportFacts(
       sex: rows.patient.sex ?? undefined,
     },
     medications,
+    adhocMeds,
     diaryMetrics,
     timeline,
     interactions: [], // populated by buildReportData (curated lookup, rule #9)
@@ -711,7 +734,7 @@ export async function loadReportRows(
       supabase
         .from("medications")
         .select(
-          "id, display_name, canonical_drug_id, colour, " +
+          "id, display_name, canonical_drug_id, colour, single_use, " +
             "prescribed_regimens(dose_amount, dose_unit, route, frequency, prescriber_name), " +
             "delivery_forms(form_type, concentration, manufacturer, expiry_date, batch), " +
             "chosen_regimens(dose_amount, dose_unit, route, frequency, active, reason_note, created_at)"
