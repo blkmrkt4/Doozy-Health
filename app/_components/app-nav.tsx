@@ -123,7 +123,7 @@ const PRIMARY: {
 }[] = [
   { key: "dashboard", label: "Dashboard", short: "Home", href: "/dashboard" },
   { key: "diary", label: "Diary", href: "/diary" },
-  { key: "add", label: "Add", href: "/medications/new", accent: true },
+  { key: "add", label: "Add Meds", short: "Add", href: "/medications/new", accent: true },
   { key: "snapshot", label: "Snapshot", href: "/report" },
   { key: "notifications", label: "Notifications", short: "Alerts", href: "/notifications" },
   { key: "settings", label: "Settings", href: "/settings" },
@@ -372,7 +372,7 @@ export function AppNav({
 
           <div className="mt-2 flex-1 space-y-1 overflow-y-auto px-3">
             {isOwner ? (
-              <SidebarLink href="/inventory/new" icon={icons.box} label="Add a supply" onClick={() => setOpen(false)} />
+              <SidebarLink href="/inventory/new" icon={icons.box} label="Add Supplies" onClick={() => setOpen(false)} />
             ) : null}
             {isOwner ? (
               <SidebarLink href="/settings/caregivers" icon={icons.users} label="Caregivers" onClick={() => setOpen(false)} />
