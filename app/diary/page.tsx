@@ -113,14 +113,22 @@ export default async function DiaryPage() {
               day from the dashboard calendar.
             </p>
           </div>
-          {active.role === "owner" ? (
+          <div className="flex shrink-0 items-center gap-2">
             <Link
-              href="/settings/tracking"
-              className="shrink-0 rounded-md border border-line px-3 py-1.5 text-sm text-muted transition-colors hover:bg-surface"
+              href="/report"
+              className="rounded-md border border-accent px-3 py-1.5 text-sm font-medium text-accent transition-opacity hover:opacity-90"
             >
-              Modify diary
+              Create snapshot
             </Link>
-          ) : null}
+            {active.role === "owner" ? (
+              <Link
+                href="/settings/tracking"
+                className="rounded-md border border-line px-3 py-1.5 text-sm text-muted transition-colors hover:bg-surface"
+              >
+                Modify diary
+              </Link>
+            ) : null}
+          </div>
         </div>
 
         {fields.length === 0 ? (
