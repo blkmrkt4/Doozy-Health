@@ -2,106 +2,112 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { generateClinicalSummary } from "./actions";
 
-// Client component for the PDF export config. Handles the download via
-// fetch to /api/report and triggers a file download. Also drives the one-time
-// clinical-summary generation (PRD §5.10.1), which is cached server-side so the
-// HTML report and the PDF read the same text.
+// Report export config (PRD §5.10, §5.10.1). The report is viewed in the
+// browser — as the styled HTML report or a plain-text version — not downloaded
+// as a PDF. Both views read the cached written summary; if it hasn't been
+// generated for the chosen dates, we offer to generate it first so the reader
+// gets an informed analysis rather than a bare diary of what was logged.
 
 const inputCls =
   "block w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-paper outline-none focus:border-accent";
 
+/** "13th", "1st", "2nd", "3rd" — ordinal suffix for a day of the month. */
+function ordinal(n: number): string {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
+}
+
+/** "Wednesday, May 13th, 2026" — a full, easy-to-read date (PRD §9 clarity). */
+function readableDate(iso: string): string {
+  const d = new Date(`${iso}T12:00:00`);
+  if (!Number.isFinite(d.getTime())) return "";
+  const weekday = d.toLocaleDateString("en-US", { weekday: "long" });
+  const month = d.toLocaleDateString("en-US", { month: "long" });
+  return `${weekday}, ${month} ${ordinal(d.getDate())}, ${d.getFullYear()}`;
+}
+
 export function ReportForm({
   patientId,
   patientName,
+  initialFrom,
+  initialTo,
+  initialHasSummary,
 }: {
   patientId: string;
   patientName: string;
+  initialFrom: string;
+  initialTo: string;
+  initialHasSummary: boolean;
 }) {
-  const today = new Date().toISOString().slice(0, 10);
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000)
-    .toISOString()
-    .slice(0, 10);
+  const router = useRouter();
 
-  const [from, setFrom] = useState(thirtyDaysAgo);
-  const [to, setTo] = useState(today);
+  const [from, setFrom] = useState(initialFrom);
+  const [to, setTo] = useState(initialTo);
   const [includeFullLog, setIncludeFullLog] = useState(false);
-  const [generating, setGenerating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  // Clinical-summary generation state. Keyed implicitly to the current range —
-  // changing the range clears the "generated" note so the user regenerates.
+  // Whether a written summary is known to exist for the *current* range. True on
+  // load if one was cached for the default range; cleared whenever the dates
+  // change (we can't be sure for a new range) and set after a generation.
+  const [summaryReady, setSummaryReady] = useState(initialHasSummary);
   const [summarizing, setSummarizing] = useState(false);
-  const [summaryDone, setSummaryDone] = useState<string | null>(null);
+  const [summaryDone, setSummaryDone] = useState(initialHasSummary);
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
-  function resetSummaryState() {
-    setSummaryDone(null);
+  // When set, the "generate the summary first?" prompt is shown; the value is
+  // the report format the user was trying to open.
+  const [pending, setPending] = useState<null | "html" | "text">(null);
+
+  const logParam = includeFullLog ? "&log=full" : "";
+
+  function onDateChange(which: "from" | "to", value: string) {
+    if (which === "from") setFrom(value);
+    else setTo(value);
+    setSummaryReady(false);
+    setSummaryDone(false);
     setSummaryError(null);
   }
 
-  async function handleGenerateSummary() {
+  function urlFor(format: "html" | "text"): string {
+    const base = format === "text" ? `/report/${patientId}/text` : `/report/${patientId}`;
+    return `${base}?from=${from}&to=${to}${logParam}`;
+  }
+
+  /** Generate the summary; returns true on success. */
+  async function generateSummary(): Promise<boolean> {
     setSummarizing(true);
     setSummaryError(null);
     try {
       const res = await generateClinicalSummary(patientId, from, to);
       if (res.ok) {
-        setSummaryDone(res.generatedAt);
-      } else {
-        setSummaryError(res.error);
+        setSummaryDone(true);
+        setSummaryReady(true);
+        return true;
       }
+      setSummaryError(res.error);
+      return false;
     } catch {
       setSummaryError("Could not generate the summary. Please try again.");
+      return false;
     } finally {
       setSummarizing(false);
     }
   }
 
-  const logParam = includeFullLog ? "&log=full" : "";
+  function openReport(format: "html" | "text") {
+    if (summaryReady) router.push(urlFor(format));
+    else setPending(format);
+  }
 
-  async function handleGenerate() {
-    setGenerating(true);
-    setError(null);
-
-    try {
-      const res = await fetch("/api/report", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          patientId,
-          from,
-          to,
-          log: includeFullLog ? "full" : undefined,
-        }),
-      });
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({ error: "Unknown error" }));
-        setError(
-          (body as { error?: string }).error ??
-            `PDF generation failed (${res.status}). Try the HTML report instead.`
-        );
-        return;
-      }
-
-      // Trigger download.
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download =
-        res.headers.get("content-disposition")?.match(/filename="(.+)"/)?.[1] ??
-        `WellKept — ${patientName} — ${from} to ${to}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      setError(
-        "PDF generation requires Chromium on the server. " +
-          "Use the HTML report link below and print to PDF from your browser."
-      );
-    } finally {
-      setGenerating(false);
+  async function generateThenView() {
+    const ok = await generateSummary();
+    if (ok && pending) {
+      const target = pending;
+      setPending(null);
+      router.push(urlFor(target));
     }
   }
 
@@ -109,10 +115,7 @@ export function ReportForm({
     <div className="min-h-full">
       <header className="border-b border-line">
         <div className="mx-auto flex max-w-2xl items-center justify-between px-6 py-4">
-          <Link
-            href="/dashboard"
-            className="text-sm text-faint hover:text-muted"
-          >
+          <Link href="/dashboard" className="text-sm text-faint hover:text-muted">
             ← Dashboard
           </Link>
           <span className="text-sm text-muted">{patientName}</span>
@@ -122,16 +125,10 @@ export function ReportForm({
       <main className="mx-auto max-w-2xl px-6 py-10 space-y-6">
         <h1 className="text-xl font-medium tracking-tight">Export report</h1>
         <p className="text-sm text-faint">
-          Generate a report for your doctor, coach, or practitioner. Choose a
-          date range, generate the written summary, then download the PDF or
-          view the HTML report.
+          Prepare a report for your doctor, coach, or practitioner. Choose a date
+          range, generate the written summary, then view it as a web page or as
+          plain text.
         </p>
-
-        {error ? (
-          <p className="rounded-md border border-yellow-900 bg-yellow-950/30 p-3 text-sm text-yellow-300">
-            {error}
-          </p>
-        ) : null}
 
         <section className="rounded-md border border-line p-4 space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -143,12 +140,10 @@ export function ReportForm({
                 id="from"
                 type="date"
                 value={from}
-                onChange={(e) => {
-                  setFrom(e.target.value);
-                  resetSummaryState();
-                }}
+                onChange={(e) => onDateChange("from", e.target.value)}
                 className={`${inputCls} mt-1`}
               />
+              <p className="mt-1.5 text-xs text-faint">{readableDate(from)}</p>
             </div>
             <div>
               <label htmlFor="to" className="block text-sm text-muted">
@@ -158,12 +153,10 @@ export function ReportForm({
                 id="to"
                 type="date"
                 value={to}
-                onChange={(e) => {
-                  setTo(e.target.value);
-                  resetSummaryState();
-                }}
+                onChange={(e) => onDateChange("to", e.target.value)}
                 className={`${inputCls} mt-1`}
               />
+              <p className="mt-1.5 text-xs text-faint">{readableDate(to)}</p>
             </div>
           </div>
 
@@ -173,7 +166,7 @@ export function ReportForm({
             regulatory disclaimer appears on every section.
           </p>
 
-          {/* ── Clinical summary (PRD §5.10.1) ──────────────────────────── */}
+          {/* ── Written summary (PRD §5.10.1) ───────────────────────────── */}
           <div className="rounded-md border border-line bg-surface/40 p-3 space-y-2">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -186,15 +179,11 @@ export function ReportForm({
               </div>
               <button
                 type="button"
-                onClick={handleGenerateSummary}
+                onClick={generateSummary}
                 disabled={summarizing}
                 className="shrink-0 rounded-md border border-accent px-3 py-2 text-sm font-medium text-accent transition-opacity hover:opacity-90 disabled:opacity-50"
               >
-                {summarizing
-                  ? "Writing…"
-                  : summaryDone
-                    ? "Regenerate"
-                    : "Generate summary"}
+                {summarizing ? "Writing…" : summaryDone ? "Regenerate" : "Generate summary"}
               </button>
             </div>
             {summaryError ? (
@@ -215,21 +204,81 @@ export function ReportForm({
           <div className="flex gap-3 pt-2">
             <button
               type="button"
-              onClick={handleGenerate}
-              disabled={generating}
-              className="rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50"
-            >
-              {generating ? "Generating..." : "Download PDF"}
-            </button>
-            <Link
-              href={`/report/${patientId}?from=${from}&to=${to}${logParam}`}
-              className="rounded-md border border-line px-4 py-2 text-sm text-muted transition-colors hover:bg-surface"
+              onClick={() => openReport("html")}
+              className="rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-on-accent transition-opacity hover:opacity-90"
             >
               View HTML report
-            </Link>
+            </button>
+            <button
+              type="button"
+              onClick={() => openReport("text")}
+              className="rounded-md border border-line px-4 py-2 text-sm text-muted transition-colors hover:bg-surface"
+            >
+              View text report
+            </button>
           </div>
         </section>
       </main>
+
+      {/* ── "Generate the summary first?" prompt ──────────────────────────── */}
+      {pending ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="report-prompt-title"
+        >
+          <div className="w-full max-w-md rounded-lg border border-line bg-surface p-5 shadow-xl">
+            <h2 id="report-prompt-title" className="text-base font-medium text-paper">
+              Add the written summary first?
+            </h2>
+            <p className="mt-2 text-sm text-muted">
+              You haven&rsquo;t created the written summary for these dates yet.
+              Without it, the report is just a plain diary — a list of the doses
+              and entries you logged, with no analysis.
+            </p>
+            <p className="mt-2 text-sm text-muted">
+              Adding the summary gives the reader a clear overview that ties your
+              medications to how you&rsquo;ve been tracking and feeling. It takes
+              a few seconds.
+            </p>
+            {summaryError ? (
+              <p className="mt-3 text-xs text-yellow-300">{summaryError}</p>
+            ) : null}
+            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setPending(null);
+                  setSummaryError(null);
+                }}
+                className="rounded-md px-3 py-2 text-sm text-faint transition-colors hover:text-muted"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = pending;
+                  setPending(null);
+                  if (target) router.push(urlFor(target));
+                }}
+                className="rounded-md border border-line px-3 py-2 text-sm text-muted transition-colors hover:bg-surface"
+              >
+                View plain report
+              </button>
+              <button
+                type="button"
+                onClick={generateThenView}
+                disabled={summarizing}
+                className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50"
+              >
+                {summarizing ? "Writing…" : "Generate, then view"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
