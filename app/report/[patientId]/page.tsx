@@ -9,15 +9,16 @@ import {
 import { buildReportPkCharts } from "@/lib/report/pk-chart-data";
 import { type ClinicalNarrative } from "@/lib/report/narrative";
 import { AmountInSystemChart } from "@/app/_components/amount-in-system-chart";
-import { NumericChart, BooleanStrip, DistributionBars } from "@/app/diary/_components/field-charts";
+import { Sparkline, BooleanStrip, DistributionBars } from "@/app/diary/_components/field-charts";
+import { ScaleChart, type ScaleSeries } from "@/app/diary/_components/scale-chart";
 import "./report.css";
 
-// Doctor PDF report page (PRD §5.10, §5.10.1, §13.16). Server-rendered HTML that
-// Puppeteer converts to PDF. The body leads with a cached clinical narrative
-// summary (generated once via the export form), then per-medication regimen +
-// adherence + PK chart, grouped tracked measures with charts, and — only when
-// asked (?log=full) — the full dose log as an appendix. Disclaimer footer on
-// every section (PRD §6.1).
+// Doctor "Snapshot" report (PRD §5.10, §5.10.1). Server-rendered HTML viewed in
+// the browser (or as plain text). The body leads with a cached clinical
+// narrative, then per-medication regimen + adherence + over-dose + PK chart, a
+// replica of the diary's tracked-measures view (combined scale chart + compact
+// mini-cards), curated interactions to discuss, and — only when asked (?log=full)
+// — the full dose log as an appendix. Disclaimer footer on every section (§6.1).
 
 const DISCLAIMER =
   "WellKept is a wellness tool. It is not a medical device and does not provide medical advice. Consult your doctor.";
@@ -49,34 +50,48 @@ function AdherenceLine({
   return <p className="report-adherence">{parts.join(" · ")}</p>;
 }
 
-function MetricGroup({
-  title,
-  series,
-}: {
-  title: string;
-  series: DiarySeries[];
-}) {
+function MeasureCard({ s }: { s: DiarySeries }) {
+  const scopeLabel = s.scope !== "general" ? metricScopeLabel(s.scope) : null;
+  return (
+    <div className="report-metric">
+      <p className="report-metric-name">
+        {s.name}
+        {scopeLabel ? (
+          <span className="report-metric-scope"> · {scopeLabel}</span>
+        ) : null}
+      </p>
+      {s.kind === "numeric" ? (
+        <>
+          <p className="report-metric-stats">
+            avg {s.stats.avg.toFixed(1)} · med {s.stats.median.toFixed(1)} · range{" "}
+            {s.stats.min}–{s.stats.max}
+            {s.unit ? ` ${s.unit}` : ""}
+          </p>
+          <Sparkline
+            points={s.points}
+            yMin={s.scale ? 1 : undefined}
+            yMax={s.scale ? 10 : undefined}
+          />
+        </>
+      ) : s.kind === "boolean" ? (
+        <BooleanStrip points={s.points} />
+      ) : (
+        <DistributionBars counts={s.counts} total={s.total} />
+      )}
+    </div>
+  );
+}
+
+function MeasureGroup({ title, series }: { title: string; series: DiarySeries[] }) {
   if (series.length === 0) return null;
   return (
     <div className="report-metric-group">
       <h3 className="report-metric-heading">{title}</h3>
-      {series.map((s, i) => (
-        <div key={i} className="report-metric">
-          <p className="report-metric-name">
-            {s.name}
-            {s.scope !== "general" ? (
-              <span className="report-metric-scope"> · {metricScopeLabel(s.scope)}</span>
-            ) : null}
-          </p>
-          {s.kind === "numeric" ? (
-            <NumericChart points={s.points} />
-          ) : s.kind === "boolean" ? (
-            <BooleanStrip points={s.points} />
-          ) : (
-            <DistributionBars counts={s.counts} total={s.total} />
-          )}
-        </div>
-      ))}
+      <div className="report-metric-grid">
+        {series.map((s, i) => (
+          <MeasureCard key={i} s={s} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -137,10 +152,28 @@ export default async function ReportPage({
     year: "numeric",
   });
 
-  // Group tracked-measure charts: general / per-medication / labs.
-  const general = data.diarySeries.filter((s) => s.scope === "general" && s.cadence === "daily");
-  const scoped = data.diarySeries.filter((s) => s.scope !== "general" && s.cadence === "daily");
-  const labs = data.diarySeries.filter((s) => s.cadence === "periodic");
+  // Replicate the diary: all 1–10 scale fields share one combined chart; the rest
+  // become compact mini-cards grouped general / per-medication / labs.
+  const scaleSeries: ScaleSeries[] = data.diarySeries
+    .filter(
+      (s): s is Extract<DiarySeries, { kind: "numeric" }> =>
+        s.kind === "numeric" && s.scale
+    )
+    .map((s) => ({
+      id: s.name,
+      name: s.name,
+      points: s.points,
+      avg: s.stats.avg,
+      median: s.stats.median,
+      min: s.stats.min,
+      max: s.stats.max,
+    }));
+  const usePanel = scaleSeries.length >= 2;
+  const panelNames = new Set(usePanel ? scaleSeries.map((s) => s.name) : []);
+  const others = data.diarySeries.filter((s) => !panelNames.has(s.name));
+  const general = others.filter((s) => s.scope === "general" && s.cadence === "daily");
+  const scoped = others.filter((s) => s.scope !== "general" && s.cadence === "daily");
+  const labs = others.filter((s) => s.cadence === "periodic");
   const hasMetrics = data.diarySeries.length > 0;
 
   return (
@@ -214,6 +247,7 @@ export default async function ReportPage({
             const delivery = (m.delivery_forms ?? [])[0];
             const chosen = (m.chosen_regimens ?? []).find((c) => c.active);
             const adh = data.medAdherence.get(m.id);
+            const od = data.medOverDose.get(m.id);
             const pk = pkCharts.get(m.id);
             const medNarrative = narrativeByMed.get(m.display_name);
 
@@ -269,6 +303,14 @@ export default async function ReportPage({
                   />
                 ) : null}
 
+                {od ? (
+                  <p className="report-overdose">
+                    Logged above the prescribed dose on {od.count}{" "}
+                    {od.count === 1 ? "day" : "days"}
+                    {od.maxRatio >= 1.1 ? ` (up to ≈ ${od.maxRatio}× prescribed)` : ""}.
+                  </p>
+                ) : null}
+
                 {medNarrative ? <p className="report-med-narrative">{medNarrative}</p> : null}
 
                 {pk ? (
@@ -290,13 +332,50 @@ export default async function ReportPage({
         <p className="report-disclaimer">{DISCLAIMER}</p>
       </section>
 
-      {/* ── Tracked measures ───────────────────────────────────── */}
+      {/* ── Interactions to discuss (curated; rule #9) ─────────── */}
+      {data.facts.interactions.length > 0 ? (
+        <section className="report-section">
+          <h2 className="report-heading">Interactions to discuss</h2>
+          <p className="report-interactions-intro">
+            From curated references, for the medications and substances on record.
+            Patterns to raise with a doctor or pharmacist — not a diagnosis or an
+            instruction.
+          </p>
+          {narrative?.interaction_observations ? (
+            <div className="report-summary">
+              <p>{narrative.interaction_observations}</p>
+            </div>
+          ) : null}
+          <ul className="report-interactions">
+            {data.facts.interactions.map((it, i) => (
+              <li key={i} className={`report-interaction sev-${it.severity}`}>
+                <span className="report-interaction-head">
+                  <span className="report-interaction-pair">
+                    {it.aLabel} + {it.bLabel}
+                  </span>
+                  <span className="report-interaction-sev">{it.severity}</span>
+                </span>
+                <span className="report-interaction-mech">{it.mechanism}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="report-disclaimer">{DISCLAIMER}</p>
+        </section>
+      ) : null}
+
+      {/* ── Tracked measures (diary replica) ───────────────────── */}
       {hasMetrics ? (
         <section className="report-section">
           <h2 className="report-heading">Tracked measures</h2>
-          <MetricGroup title="General" series={general} />
-          <MetricGroup title="By medication" series={scoped} />
-          <MetricGroup title="Labs & measurements" series={labs} />
+          {usePanel ? (
+            <div className="report-scale-panel">
+              <p className="report-metric-heading">Scale measures (1–10)</p>
+              <ScaleChart fields={scaleSeries} />
+            </div>
+          ) : null}
+          <MeasureGroup title="General" series={general} />
+          <MeasureGroup title="By medication" series={scoped} />
+          <MeasureGroup title="Labs & measurements" series={labs} />
           <p className="report-disclaimer">{DISCLAIMER}</p>
         </section>
       ) : null}

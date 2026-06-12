@@ -3,8 +3,11 @@ import {
   frequencyIntervalMs,
   dayKey,
 } from "@/lib/schedule";
-import { formatRegimenSummary, formatRoute } from "@/lib/format";
+import { formatDose, formatRegimenSummary, formatRoute } from "@/lib/format";
+import { convertDose } from "@/lib/units";
 import { isFrequency, type Frequency, type FieldType } from "@/lib/types";
+import { substanceForField } from "@/lib/report/substances";
+import type { InteractionFact } from "@/lib/interactions";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 // Deterministic facts layer for the doctor report (PRD §5.10.1). Everything a
@@ -127,6 +130,15 @@ export type AdherenceFacts = {
     | "insufficient data";
 };
 
+/** Logged doses that exceeded the prescribed amount (PRD §5.10.1). Factual; the
+ *  report never tells the user to change a dose (§6.1). */
+export type OverDoseFacts = {
+  count: number;
+  /** highest logged ÷ prescribed ratio observed. */
+  maxRatio: number;
+  examples: { date: string; loggedLabel: string; prescribedLabel: string }[];
+};
+
 export type MedicationFacts = {
   name: string;
   route: string;
@@ -134,6 +146,7 @@ export type MedicationFacts = {
   prescribedRegimen: string | null;
   reasonNote: string | null;
   adherence: AdherenceFacts;
+  overDose?: OverDoseFacts;
 };
 
 export type MetricScope = "general" | { medications: string[] };
@@ -145,11 +158,15 @@ export type DiaryMetricFacts = {
   fieldType: FieldType;
   unit: string | null;
   entries: number;
+  /** set when the field maps to a tracked substance (alcohol/caffeine/nicotine). */
+  isSubstance?: boolean;
+  substanceName?: string;
   /** number / scale_1_10 */
   numeric?: {
     min: number;
     max: number;
     mean: number;
+    median: number;
     first: number;
     last: number;
   };
@@ -173,6 +190,9 @@ export type ReportFacts = {
   medications: MedicationFacts[];
   diaryMetrics: DiaryMetricFacts[];
   timeline: TimelineWeek[];
+  /** Curated drug/substance interactions among the in-scope drug set (rule #9 —
+   *  ground truth only; populated by buildReportData, never by the LLM). */
+  interactions: InteractionFact[];
 };
 
 // ── Chart series (full resolution, for the deterministic SVG charts) ─────────
@@ -184,6 +204,9 @@ export type DiarySeries =
       scope: MetricScope;
       cadence: "daily" | "periodic";
       unit: string | null;
+      /** true for scale_1_10 fields — these share the combined 1–10 chart. */
+      scale: boolean;
+      stats: { avg: number; median: number; min: number; max: number };
       points: { date: string; value: number }[];
     }
   | {
@@ -208,6 +231,8 @@ export type ReportData = {
   diarySeries: DiarySeries[];
   /** medication id → adherence, for the deterministic per-med stat line. */
   medAdherence: Map<string, AdherenceFacts>;
+  /** medication id → over-dose facts, for the per-med stat line. */
+  medOverDose: Map<string, OverDoseFacts>;
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -230,6 +255,14 @@ function ageFromDob(dob: string | null, refIso: string): number | undefined {
 function mean(ns: number[]): number {
   if (ns.length === 0) return 0;
   return Math.round((ns.reduce((a, b) => a + b, 0) / ns.length) * 10) / 10;
+}
+
+function median(ns: number[]): number {
+  if (ns.length === 0) return 0;
+  const s = [...ns].sort((a, b) => a - b);
+  const mid = s.length >> 1;
+  const m = s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+  return Math.round(m * 10) / 10;
 }
 
 function scopeLabel(scope: MetricScope): string {
@@ -345,6 +378,42 @@ export function computeAdherence(
   };
 }
 
+/**
+ * Compare logged doses to the prescribed dose and report any that exceeded it.
+ * Unit mismatches that can't be converted (e.g. "tablet" vs "mg") are skipped —
+ * we never guess. Factual only; the report never tells the user to change a dose.
+ */
+function computeOverDose(
+  prescribedAmount: number,
+  prescribedUnit: string,
+  taken: { ms: number; amount: number; unit: string }[]
+): OverDoseFacts | undefined {
+  if (!(prescribedAmount > 0)) return undefined;
+  const TOL = 1.01; // 1% tolerance to avoid float / rounding noise
+  let count = 0;
+  let maxRatio = 1;
+  const examples: OverDoseFacts["examples"] = [];
+  for (const t of taken) {
+    const loggedInPrescribedUnit =
+      t.unit === prescribedUnit ? t.amount : convertDose(t.amount, t.unit, prescribedUnit);
+    if (loggedInPrescribedUnit == null) continue; // incomparable units — skip
+    const ratio = loggedInPrescribedUnit / prescribedAmount;
+    if (ratio > TOL) {
+      count++;
+      maxRatio = Math.max(maxRatio, ratio);
+      if (examples.length < 2) {
+        examples.push({
+          date: dayKey(t.ms),
+          loggedLabel: formatDose(t.amount, t.unit),
+          prescribedLabel: formatDose(prescribedAmount, prescribedUnit),
+        });
+      }
+    }
+  }
+  if (count === 0) return undefined;
+  return { count, maxRatio: Math.round(maxRatio * 100) / 100, examples };
+}
+
 // ── Pure compute ─────────────────────────────────────────────────────────────
 
 /**
@@ -364,6 +433,7 @@ export function computeReportFacts(
 
   // Logs in range, bucketed by medication and event class.
   const takenByMed = new Map<string, number[]>();
+  const takenDosesByMed = new Map<string, { ms: number; amount: number; unit: string }[]>();
   const skippedByMed = new Map<string, number>();
   for (const l of rows.doseLogs) {
     const ts = new Date(l.logged_at).getTime();
@@ -372,6 +442,14 @@ export function computeReportFacts(
       const arr = takenByMed.get(l.medication_id) ?? [];
       arr.push(ts);
       takenByMed.set(l.medication_id, arr);
+      if (l.amount != null && l.unit) {
+        const n = Number(l.amount);
+        if (Number.isFinite(n) && n > 0) {
+          const d = takenDosesByMed.get(l.medication_id) ?? [];
+          d.push({ ms: ts, amount: n, unit: l.unit });
+          takenDosesByMed.set(l.medication_id, d);
+        }
+      }
     } else if (l.event_type === "skipped") {
       skippedByMed.set(l.medication_id, (skippedByMed.get(l.medication_id) ?? 0) + 1);
     }
@@ -379,11 +457,24 @@ export function computeReportFacts(
 
   // ── Per-medication facts ───────────────────────────────────────────────────
   const medAdherence = new Map<string, AdherenceFacts>();
+  const medOverDose = new Map<string, OverDoseFacts>();
   const medications: MedicationFacts[] = rows.medications.map((m) => {
     const chosen = activeChosen(m);
     const prescribed = (m.prescribed_regimens ?? [])[0] ?? null;
     const taken = takenByMed.get(m.id) ?? [];
     const skipped = skippedByMed.get(m.id) ?? 0;
+
+    // Over-dose: compare logged amounts to the prescribed dose (fall back to the
+    // chosen dose when there's no prescription).
+    const baseline = prescribed ?? chosen;
+    const overDose = baseline
+      ? computeOverDose(
+          Number(baseline.dose_amount),
+          baseline.dose_unit,
+          takenDosesByMed.get(m.id) ?? []
+        )
+      : undefined;
+    if (overDose) medOverDose.set(m.id, overDose);
 
     let adherence: AdherenceFacts;
     if (chosen && isFrequency(chosen.frequency)) {
@@ -430,6 +521,7 @@ export function computeReportFacts(
         : null,
       reasonNote: chosen?.reason_note ?? null,
       adherence,
+      overDose,
     };
   });
 
@@ -450,6 +542,10 @@ export function computeReportFacts(
         : { medications: scopeIds.map((id) => medName.get(id) ?? "a medication") };
     const cadence: "daily" | "periodic" = f.cadence === "periodic" ? "periodic" : "daily";
     const fieldType = f.field_type as FieldType;
+    const substanceName = substanceForField(f.name);
+    const substance = substanceName
+      ? { isSubstance: true as const, substanceName }
+      : {};
 
     // Collect this field's values across in-range entries, in date order.
     const samples: { date: string; raw: unknown }[] = [];
@@ -469,25 +565,41 @@ export function computeReportFacts(
         .filter((p) => Number.isFinite(p.value));
       if (points.length === 0) continue;
       const vals = points.map((p) => p.value);
+      const stats = {
+        avg: mean(vals),
+        median: median(vals),
+        min: Math.min(...vals),
+        max: Math.max(...vals),
+      };
       diaryMetrics.push({
         ...base,
+        ...substance,
         fieldType,
         unit: f.unit,
         entries: points.length,
         numeric: {
-          min: Math.min(...vals),
-          max: Math.max(...vals),
-          mean: mean(vals),
+          min: stats.min,
+          max: stats.max,
+          mean: stats.avg,
+          median: stats.median,
           first: vals[0],
           last: vals[vals.length - 1],
         },
       });
-      diarySeries.push({ kind: "numeric", ...base, unit: f.unit, points });
+      diarySeries.push({
+        kind: "numeric",
+        ...base,
+        unit: f.unit,
+        scale: fieldType === "scale_1_10",
+        stats,
+        points,
+      });
     } else if (fieldType === "boolean") {
       const points = samples.map((s) => ({ date: s.date, value: Boolean(s.raw) }));
       const yes = points.filter((p) => p.value).length;
       diaryMetrics.push({
         ...base,
+        ...substance,
         fieldType,
         unit: f.unit,
         entries: points.length,
@@ -508,6 +620,7 @@ export function computeReportFacts(
         .sort((a, b) => b.count - a.count);
       diaryMetrics.push({
         ...base,
+        ...substance,
         fieldType,
         unit: f.unit,
         entries: samples.length,
@@ -518,6 +631,7 @@ export function computeReportFacts(
       // freetext: count only — never dump raw note text into the LLM facts.
       diaryMetrics.push({
         ...base,
+        ...substance,
         fieldType,
         unit: f.unit,
         entries: samples.length,
@@ -573,9 +687,10 @@ export function computeReportFacts(
     medications,
     diaryMetrics,
     timeline,
+    interactions: [], // populated by buildReportData (curated lookup, rule #9)
   };
 
-  return { rows, facts, diarySeries, medAdherence };
+  return { rows, facts, diarySeries, medAdherence, medOverDose };
 }
 
 // ── Supabase loader ──────────────────────────────────────────────────────────
@@ -654,7 +769,54 @@ export async function buildReportData(
   to: string
 ): Promise<ReportData> {
   const rows = await loadReportRows(supabase, patientId, from, to);
-  return computeReportFacts(rows, from, to);
+  const data = computeReportFacts(rows, from, to);
+  data.facts.interactions = await gatherInteractions(supabase, rows, data);
+  return data;
+}
+
+/**
+ * Curated interaction lookup across the in-scope drug set: active medications'
+ * canonical drugs + any substances tracked in the diary (alcohol/caffeine/…),
+ * mapped to their canonical `drugs` row. Ground truth is the curated
+ * drug_interactions table only — never the LLM (hard rule #9). The server-only
+ * lookup is imported lazily so computeReportFacts stays pure/testable.
+ */
+async function gatherInteractions(
+  supabase: SupabaseClient,
+  rows: ReportRows,
+  data: ReportData
+): Promise<InteractionFact[]> {
+  const items: { drugId: string; label: string }[] = [];
+
+  // Active medications with a resolved canonical drug.
+  for (const m of rows.medications) {
+    if (m.canonical_drug_id) items.push({ drugId: m.canonical_drug_id, label: m.display_name });
+  }
+
+  // Substances tracked in the diary → their canonical drug rows.
+  const substanceNames = Array.from(
+    new Set(
+      data.facts.diaryMetrics
+        .filter((d) => d.isSubstance && d.substanceName)
+        .map((d) => d.substanceName as string)
+    )
+  );
+  if (substanceNames.length > 0) {
+    const { data: drugRows } = await supabase
+      .from("drugs")
+      .select("id, canonical_name")
+      .in("canonical_name", substanceNames);
+    for (const r of drugRows ?? []) {
+      items.push({
+        drugId: r.id as string,
+        label: `${r.canonical_name as string} (tracked in diary)`,
+      });
+    }
+  }
+
+  if (items.length < 2) return [];
+  const { findInteractionsAmong } = await import("@/lib/interactions");
+  return findInteractionsAmong(supabase, items);
 }
 
 /** Compact label for the scope of a metric, for prose/UI. */

@@ -51,6 +51,7 @@ export type CatalogueInteraction = {
 };
 
 const TEXTBOOK = { source: "textbook PK (illustrative, not clinical)" };
+const CURATED = { source: "curated reference (illustrative, not clinical)" };
 
 export const DRUG_CATALOGUE: CatalogueDrug[] = [
   {
@@ -243,6 +244,141 @@ export const DRUG_CATALOGUE: CatalogueDrug[] = [
     is_linear: true,
     reference_data: TEXTBOOK,
   },
+  {
+    canonical_name: "citalopram",
+    atc_class: "N06AB04",
+    half_life_hours: { oral: 35 },
+    half_life_range_hours: { oral: [30, 40] },
+    bioavailability: { oral: 0.8 },
+    tmax_hours: { oral: 4 },
+    kernel_by_route: { oral: "bateman" },
+    is_linear: true,
+    reference_data: TEXTBOOK,
+  },
+  {
+    canonical_name: "diazepam",
+    atc_class: "N05BA01",
+    half_life_hours: { oral: 43 },
+    half_life_range_hours: { oral: [20, 70] },
+    bioavailability: { oral: 0.93 },
+    tmax_hours: { oral: 1.25 },
+    kernel_by_route: { oral: "bateman" },
+    is_linear: true,
+    controlled_schedule: "CIV",
+    reference_data: TEXTBOOK,
+  },
+  {
+    canonical_name: "zolpidem",
+    atc_class: "N05CF02",
+    half_life_hours: { oral: 2.5 },
+    half_life_range_hours: { oral: [1.5, 3.5] },
+    bioavailability: { oral: 0.7 },
+    tmax_hours: { oral: 1.6 },
+    kernel_by_route: { oral: "bateman" },
+    is_linear: true,
+    controlled_schedule: "CIV",
+    reference_data: TEXTBOOK,
+  },
+  // ── Substances & common OTCs (interaction reference) ──────────────────────
+  // PK is illustrative; these mainly exist so a tracked substance (alcohol) or a
+  // one-off OTC dose can be matched against the curated drug_interactions table.
+  {
+    canonical_name: "alcohol",
+    atc_class: "V03AB",
+    half_life_hours: { oral: 0.5 },
+    is_linear: false,
+    nonlinear_reason:
+      "Alcohol is eliminated by zero-order kinetics (a roughly fixed amount per hour), so a simple half-life curve does not apply.",
+    reference_data: CURATED,
+  },
+  {
+    canonical_name: "caffeine",
+    atc_class: "N06BC01",
+    half_life_hours: { oral: 5 },
+    half_life_range_hours: { oral: [3, 7] },
+    bioavailability: { oral: 1.0 },
+    tmax_hours: { oral: 0.75 },
+    kernel_by_route: { oral: "bateman" },
+    is_linear: true,
+    reference_data: CURATED,
+  },
+  {
+    canonical_name: "nicotine",
+    atc_class: "N07BA01",
+    half_life_hours: { oral: 2, transdermal: 2 },
+    bioavailability: { oral: 0.3, transdermal: 1.0 },
+    tmax_hours: { oral: 1, transdermal: 6 },
+    kernel_by_route: { oral: "bateman", transdermal: "zeroOrder" },
+    release_duration_hours: { transdermal: 24 },
+    is_linear: true,
+    reference_data: CURATED,
+  },
+  {
+    canonical_name: "acetaminophen",
+    atc_class: "N02BE01",
+    half_life_hours: { oral: 2.5 },
+    half_life_range_hours: { oral: [2, 3] },
+    bioavailability: { oral: 0.88 },
+    tmax_hours: { oral: 1 },
+    kernel_by_route: { oral: "bateman" },
+    is_linear: true,
+    reference_data: TEXTBOOK,
+  },
+  {
+    canonical_name: "ibuprofen",
+    atc_class: "M01AE01",
+    half_life_hours: { oral: 2 },
+    half_life_range_hours: { oral: [1.8, 2.4] },
+    bioavailability: { oral: 0.9 },
+    tmax_hours: { oral: 1.5 },
+    kernel_by_route: { oral: "bateman" },
+    is_linear: true,
+    reference_data: TEXTBOOK,
+  },
+  {
+    canonical_name: "naproxen",
+    atc_class: "M01AE02",
+    half_life_hours: { oral: 14 },
+    half_life_range_hours: { oral: [12, 17] },
+    bioavailability: { oral: 0.95 },
+    tmax_hours: { oral: 2 },
+    kernel_by_route: { oral: "bateman" },
+    is_linear: true,
+    reference_data: TEXTBOOK,
+  },
+  {
+    canonical_name: "dextromethorphan",
+    atc_class: "R05DA09",
+    half_life_hours: { oral: 3.5 },
+    half_life_range_hours: { oral: [2, 4] },
+    bioavailability: { oral: 0.11 },
+    tmax_hours: { oral: 2.5 },
+    kernel_by_route: { oral: "bateman" },
+    is_linear: true,
+    reference_data: TEXTBOOK,
+  },
+  {
+    canonical_name: "diphenhydramine",
+    atc_class: "R06AA02",
+    half_life_hours: { oral: 8 },
+    half_life_range_hours: { oral: [4, 12] },
+    bioavailability: { oral: 0.4 },
+    tmax_hours: { oral: 2 },
+    kernel_by_route: { oral: "bateman" },
+    is_linear: true,
+    reference_data: TEXTBOOK,
+  },
+  {
+    canonical_name: "pseudoephedrine",
+    atc_class: "R01BA02",
+    half_life_hours: { oral: 6 },
+    half_life_range_hours: { oral: [5, 8] },
+    bioavailability: { oral: 0.9 },
+    tmax_hours: { oral: 2 },
+    kernel_by_route: { oral: "bateman" },
+    is_linear: true,
+    reference_data: TEXTBOOK,
+  },
 ];
 
 export const INTERACTION_CATALOGUE: CatalogueInteraction[] = [
@@ -287,5 +423,151 @@ export const INTERACTION_CATALOGUE: CatalogueInteraction[] = [
     severity: "caution",
     mechanism:
       "Potential additive stimulatory and serotonergic effects; blood pressure and mood worth monitoring.",
+  },
+
+  // ── Alcohol × CNS-active medications ──────────────────────────────────────
+  {
+    a: "alcohol",
+    b: "citalopram",
+    severity: "caution",
+    mechanism:
+      "Both act on the central nervous system; combined use can increase drowsiness, dizziness, and impaired concentration, and may worsen mood.",
+  },
+  {
+    a: "alcohol",
+    b: "escitalopram",
+    severity: "caution",
+    mechanism:
+      "Both act on the central nervous system; combined use can increase drowsiness, dizziness, and impaired concentration, and may worsen mood.",
+  },
+  {
+    a: "alcohol",
+    b: "sertraline",
+    severity: "caution",
+    mechanism:
+      "Both act on the central nervous system; combined use can increase drowsiness, dizziness, and impaired concentration, and may worsen mood.",
+  },
+  {
+    a: "alcohol",
+    b: "fluoxetine",
+    severity: "caution",
+    mechanism:
+      "Both act on the central nervous system; combined use can increase drowsiness, dizziness, and impaired concentration, and may worsen mood.",
+  },
+  {
+    a: "alcohol",
+    b: "bupropion",
+    severity: "caution",
+    mechanism:
+      "Alcohol and bupropion can each affect the seizure threshold; combined use may add to that risk and to central nervous system effects.",
+  },
+  {
+    a: "alcohol",
+    b: "diazepam",
+    severity: "serious",
+    mechanism:
+      "Both are central nervous system depressants; together they markedly increase sedation, slowed breathing, and impaired coordination.",
+  },
+  {
+    a: "alcohol",
+    b: "zolpidem",
+    severity: "serious",
+    mechanism:
+      "Both depress the central nervous system; combined use increases sedation, impaired coordination, and the chance of complex sleep behaviors.",
+  },
+  {
+    a: "alcohol",
+    b: "oxycodone",
+    severity: "serious",
+    mechanism:
+      "Alcohol and opioids together produce additive central nervous system and respiratory depression.",
+  },
+  {
+    a: "alcohol",
+    b: "tramadol",
+    severity: "serious",
+    mechanism:
+      "Additive central nervous system depression, and tramadol can also lower the seizure threshold.",
+  },
+  {
+    a: "alcohol",
+    b: "diphenhydramine",
+    severity: "caution",
+    mechanism:
+      "Both cause sedation; together they increase drowsiness and impaired alertness.",
+  },
+  {
+    a: "alcohol",
+    b: "lamotrigine",
+    severity: "info",
+    mechanism:
+      "Both can cause dizziness or drowsiness; combined use may add to these effects.",
+  },
+
+  // ── Alcohol / NSAID × GI or hepatic risk ──────────────────────────────────
+  {
+    a: "alcohol",
+    b: "acetaminophen",
+    severity: "caution",
+    mechanism:
+      "Regular alcohol use together with acetaminophen increases the risk of liver injury.",
+  },
+  {
+    a: "alcohol",
+    b: "ibuprofen",
+    severity: "caution",
+    mechanism:
+      "Both can irritate the stomach lining; combined use increases the risk of stomach upset and gastrointestinal bleeding.",
+  },
+  {
+    a: "ibuprofen",
+    b: "sertraline",
+    severity: "caution",
+    mechanism:
+      "NSAIDs combined with SSRIs increase the risk of gastrointestinal bleeding.",
+  },
+  {
+    a: "ibuprofen",
+    b: "escitalopram",
+    severity: "caution",
+    mechanism:
+      "NSAIDs combined with SSRIs increase the risk of gastrointestinal bleeding.",
+  },
+  {
+    a: "ibuprofen",
+    b: "citalopram",
+    severity: "caution",
+    mechanism:
+      "NSAIDs combined with SSRIs increase the risk of gastrointestinal bleeding.",
+  },
+  {
+    a: "naproxen",
+    b: "sertraline",
+    severity: "caution",
+    mechanism:
+      "NSAIDs combined with SSRIs increase the risk of gastrointestinal bleeding.",
+  },
+
+  // ── Other common OTC pairings ─────────────────────────────────────────────
+  {
+    a: "pseudoephedrine",
+    b: "methylphenidate",
+    severity: "caution",
+    mechanism:
+      "Both are stimulants; combined use can add to increases in heart rate and blood pressure.",
+  },
+  {
+    a: "dextromethorphan",
+    b: "sertraline",
+    severity: "caution",
+    mechanism:
+      "Both raise serotonin activity; combined use can increase the risk of serotonin-related effects.",
+  },
+  {
+    a: "dextromethorphan",
+    b: "fluoxetine",
+    severity: "caution",
+    mechanism:
+      "Both raise serotonin activity; combined use can increase the risk of serotonin-related effects.",
   },
 ];

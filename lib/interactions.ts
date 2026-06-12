@@ -86,6 +86,64 @@ export async function checkInteractions(
   return results;
 }
 
+export type InteractionFact = {
+  severity: "info" | "caution" | "serious";
+  mechanism: string;
+  aLabel: string;
+  bLabel: string;
+};
+
+/**
+ * Find every curated interaction among a SET of drugs (the report's whole
+ * in-scope set: active medications + tracked substances + ad-hoc OTC meds).
+ * Generalizes checkInteractions, which is per-drug. Ground truth is the curated
+ * drug_interactions table only — never the LLM (hard rule #9).
+ *
+ * `items` carries a display label per drug id (e.g. "alcohol (tracked in diary)").
+ * Pairs are deduped; results are ordered serious → caution → info.
+ */
+export async function findInteractionsAmong(
+  supabase: SupabaseClient,
+  items: { drugId: string; label: string }[]
+): Promise<InteractionFact[]> {
+  // Unique drug ids, with a label for each (first label wins).
+  const labelByDrug = new Map<string, string>();
+  for (const it of items) {
+    if (!it.drugId) continue;
+    if (!labelByDrug.has(it.drugId)) labelByDrug.set(it.drugId, it.label);
+  }
+  const drugIds = [...labelByDrug.keys()];
+  if (drugIds.length < 2) return [];
+
+  // Any curated pair where BOTH drugs are in the set.
+  const { data: rows } = await supabase
+    .from("drug_interactions")
+    .select("drug_a_id, drug_b_id, severity, mechanism")
+    .in("drug_a_id", drugIds)
+    .in("drug_b_id", drugIds);
+
+  const seen = new Set<string>();
+  const facts: InteractionFact[] = [];
+  for (const row of rows ?? []) {
+    const a = row.drug_a_id as string;
+    const b = row.drug_b_id as string;
+    if (a === b) continue;
+    const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    facts.push({
+      severity: row.severity as InteractionFact["severity"],
+      mechanism: row.mechanism as string,
+      aLabel: labelByDrug.get(a) ?? "Unknown",
+      bLabel: labelByDrug.get(b) ?? "Unknown",
+    });
+  }
+
+  const order = { serious: 0, caution: 1, info: 2 };
+  facts.sort((x, y) => order[x.severity] - order[y.severity]);
+  return facts;
+}
+
 /**
  * Render a curated interaction record in plain English via the
  * explain_interaction prompt (PRD §14.8). Falls back to the raw mechanism

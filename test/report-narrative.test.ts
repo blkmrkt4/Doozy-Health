@@ -101,7 +101,7 @@ const facts: ReportFacts = {
       fieldType: "scale_1_10",
       unit: null,
       entries: 10,
-      numeric: { min: 4, max: 8, mean: 6.1, first: 4, last: 7 },
+      numeric: { min: 4, max: 8, mean: 6.1, median: 6, first: 4, last: 7 },
     },
     {
       name: "Blood pressure systolic",
@@ -110,10 +110,11 @@ const facts: ReportFacts = {
       fieldType: "number",
       unit: "mmHg",
       entries: 2,
-      numeric: { min: 120, max: 124, mean: 122, first: 120, last: 124 },
+      numeric: { min: 120, max: 124, mean: 122, median: 122, first: 120, last: 124 },
     },
   ],
   timeline: [],
+  interactions: [],
 };
 
 describe("buildFallbackNarrative", () => {
@@ -136,5 +137,29 @@ describe("buildFallbackNarrative", () => {
         [n.overview, n.adherence_notes, n.diary_observations, ...n.medications.map((m) => m.summary)].join(" ")
       )
     ).toBe(false);
+  });
+
+  it("lists only curated interactions present in the facts, non-directively", () => {
+    const withInteractions = {
+      ...facts,
+      interactions: [
+        {
+          severity: "caution" as const,
+          mechanism: "Both act on the central nervous system; combined use can increase drowsiness.",
+          aLabel: "alcohol (tracked in diary)",
+          bLabel: "citalopram",
+        },
+      ],
+    };
+    const n = buildFallbackNarrative(withInteractions);
+    expect(n.interaction_observations).toContain("citalopram");
+    expect(n.interaction_observations).toContain("alcohol (tracked in diary)");
+    // Framed as something to discuss — never directive (§6.1, rule #9).
+    expect(n.interaction_observations.toLowerCase()).toContain("discuss");
+    expect(containsBannedLanguage(n.interaction_observations)).toBe(false);
+  });
+
+  it("emits no interaction text when the facts hold none", () => {
+    expect(buildFallbackNarrative(facts).interaction_observations).toBe("");
   });
 });

@@ -47,7 +47,7 @@ const data = {
         fieldType: "scale_1_10",
         unit: null,
         entries: 10,
-        numeric: { min: 4, max: 8, mean: 6.1, first: 4, last: 7 },
+        numeric: { min: 4, max: 8, mean: 6.1, median: 6, first: 4, last: 7 },
       },
       {
         name: "Blood pressure systolic",
@@ -56,10 +56,11 @@ const data = {
         fieldType: "number",
         unit: "mmHg",
         entries: 2,
-        numeric: { min: 120, max: 124, mean: 122, first: 120, last: 124 },
+        numeric: { min: 120, max: 124, mean: 122, median: 122, first: 120, last: 124 },
       },
     ],
     timeline: [],
+    interactions: [],
   },
 } as unknown as ReportData;
 
@@ -69,6 +70,7 @@ const narrative: ClinicalNarrative = {
   adherence_notes: "Consistent dosing.",
   diary_observations: "Energy trended up.",
   correlation_observations: "",
+  interaction_observations: "",
   data_caveats: "",
   generatedByLlm: true,
 };

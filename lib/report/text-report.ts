@@ -54,7 +54,7 @@ function metricLine(d: DiaryMetricFacts): string {
         : d.numeric.last < d.numeric.first
           ? "trending down"
           : "steady";
-    return `${d.name}${where}: ${d.entries} entries, mean ${d.numeric.mean}${unit} (range ${d.numeric.min}–${d.numeric.max}${unit}), ${trend} (${d.numeric.first} → ${d.numeric.last})`;
+    return `${d.name}${where}: ${d.entries} entries, mean ${d.numeric.mean}${unit}, median ${d.numeric.median}${unit} (range ${d.numeric.min}–${d.numeric.max}${unit}), ${trend} (${d.numeric.first} → ${d.numeric.last})`;
   }
   if (d.boolean) {
     return `${d.name}${where}: "yes" on ${d.boolean.yes} of ${d.boolean.total} entries`;
@@ -94,6 +94,8 @@ export function renderReportText(opts: {
       out.push(`Tracked measures — ${narrative.diary_observations}`, "");
     if (narrative.correlation_observations)
       out.push(`Patterns to discuss — ${narrative.correlation_observations}`, "");
+    if (narrative.interaction_observations)
+      out.push(`Interactions — ${narrative.interaction_observations}`, "");
     if (narrative.data_caveats) out.push(narrative.data_caveats, "");
     out.push("Illustrative summary of what was logged — not medical advice.");
   } else {
@@ -115,10 +117,33 @@ export function renderReportText(opts: {
       if (m.chosenRegimen) out.push(`  Taking: ${m.chosenRegimen}`);
       if (m.reasonNote) out.push(`  Note: ${m.reasonNote}`);
       out.push(`  ${adherenceText(m.adherence)}`);
+      if (m.overDose) {
+        out.push(
+          `  Logged above the prescribed dose on ${m.overDose.count} ` +
+            `${m.overDose.count === 1 ? "occasion" : "occasions"}` +
+            (m.overDose.maxRatio >= 1.1 ? ` (up to ≈ ${m.overDose.maxRatio}× prescribed)` : "") +
+            "."
+        );
+      }
       const summary = narrative?.medications.find((x) => x.name === m.name)?.summary;
       if (summary) out.push(`  ${summary}`);
       out.push("");
     }
+  }
+
+  // ── Interactions to discuss (curated; rule #9) ─────────────────────────────
+  if (facts.interactions.length > 0) {
+    out.push(RULE, "INTERACTIONS TO DISCUSS", RULE);
+    out.push(
+      "From curated references, for the medications and substances on record.",
+      "Patterns to raise with a doctor or pharmacist — not a diagnosis or instruction.",
+      ""
+    );
+    for (const it of facts.interactions) {
+      out.push(`${it.aLabel} + ${it.bLabel}  [${it.severity}]`);
+      out.push(`  ${it.mechanism}`);
+    }
+    out.push("");
   }
 
   // ── Tracked measures ───────────────────────────────────────────────────────

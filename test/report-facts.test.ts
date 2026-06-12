@@ -145,7 +145,76 @@ describe("computeReportFacts", () => {
     const energySeries = diarySeries.find((s) => s.name === "Energy");
     expect(energySeries?.kind).toBe("numeric");
 
+    // Series carry stats + the scale flag for the report's diary-replica view.
+    expect(energySeries?.kind === "numeric" && energySeries.scale).toBe(true);
+    expect(energySeries?.kind === "numeric" && energySeries.stats.median).toBe(6); // [4,6,7]→6
+    expect((bp.numeric as { median: number }).median).toBe(122); // [120,124]→122
+
     // Weekly timeline aligns numeric means for correlation narration.
     expect(facts.timeline.length).toBeGreaterThan(0);
+  });
+
+  it("flags doses logged above the prescribed amount, with unit conversion", () => {
+    const r = rows({
+      medications: [
+        {
+          id: "med-x",
+          display_name: "methylphenidate",
+          canonical_drug_id: null,
+          colour: null,
+          prescribed_regimens: [
+            {
+              dose_amount: "10",
+              dose_unit: "mg",
+              route: "oral",
+              frequency: { type: "every", interval: 1, unit: "day" },
+              prescriber_name: null,
+            },
+          ],
+          delivery_forms: null,
+          chosen_regimens: [
+            {
+              dose_amount: "10",
+              dose_unit: "mg",
+              route: "oral",
+              frequency: { type: "every", interval: 1, unit: "day" },
+              active: true,
+              reason_note: null,
+              created_at: `${from}T00:00:00`,
+            },
+          ],
+        },
+      ],
+      doseLogs: [
+        // within prescribed
+        { medication_id: "med-x", event_type: "taken", logged_at: `${from}T08:00:00`, amount: "10", unit: "mg", route_taken: "oral", site: null, note: null },
+        // above prescribed
+        { medication_id: "med-x", event_type: "taken", logged_at: `2026-05-10T08:00:00`, amount: "20", unit: "mg", route_taken: "oral", site: null, note: null },
+        // above prescribed, different (convertible) unit: 0.05 g = 50 mg
+        { medication_id: "med-x", event_type: "taken", logged_at: `2026-05-12T08:00:00`, amount: "0.05", unit: "g", route_taken: "oral", site: null, note: null },
+      ],
+    });
+
+    const { facts, medOverDose } = computeReportFacts(r, from, to);
+    const med = facts.medications[0];
+    expect(med.overDose?.count).toBe(2);
+    expect(med.overDose?.maxRatio).toBe(5); // 50 mg / 10 mg
+    expect(medOverDose.get("med-x")?.count).toBe(2);
+  });
+
+  it("marks a tracked substance (alcohol) as a substance", () => {
+    const r = rows({
+      trackedFields: [
+        { id: "alc", name: "Alcohol", field_type: "number", unit: "drinks", category_options: null, cadence: "daily" },
+      ],
+      diaryEntries: [
+        { entry_at: `${from}T20:00:00`, field_values: { alc: 2 }, note: null },
+        { entry_at: `2026-05-20T20:00:00`, field_values: { alc: 0 }, note: null },
+      ],
+    });
+    const { facts } = computeReportFacts(r, from, to);
+    const alcohol = facts.diaryMetrics.find((d) => d.name === "Alcohol")!;
+    expect(alcohol.isSubstance).toBe(true);
+    expect(alcohol.substanceName).toBe("alcohol");
   });
 });

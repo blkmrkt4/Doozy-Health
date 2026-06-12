@@ -25,6 +25,8 @@ export type ClinicalNarrative = {
   adherence_notes: string;
   diary_observations: string;
   correlation_observations: string;
+  /** describes ONLY curated interactions present in the facts (rule #9). */
+  interaction_observations: string;
   data_caveats: string;
   /** false when the deterministic fallback produced this (no/failed LLM). */
   generatedByLlm: boolean;
@@ -57,6 +59,7 @@ function narrativeText(n: ClinicalNarrative): string {
     n.adherence_notes,
     n.diary_observations,
     n.correlation_observations,
+    n.interaction_observations,
     n.data_caveats,
     ...n.medications.map((m) => m.summary),
   ].join("\n");
@@ -90,6 +93,7 @@ export function validateNarrative(obj: Record<string, unknown>): ClinicalNarrati
     adherence_notes: asString(obj.adherence_notes),
     diary_observations: asString(obj.diary_observations),
     correlation_observations: asString(obj.correlation_observations),
+    interaction_observations: asString(obj.interaction_observations),
     data_caveats: asString(obj.data_caveats),
     generatedByLlm: true,
   };
@@ -129,11 +133,20 @@ function adherenceSentence(m: MedicationFacts): string {
   return parts.join(" ") + ".";
 }
 
+function overDoseSentence(m: MedicationFacts): string {
+  const o = m.overDose;
+  if (!o) return "";
+  const upTo =
+    o.maxRatio >= 1.1 ? ` (up to about ${o.maxRatio}× the prescribed amount)` : "";
+  return ` On ${o.count} occasion${o.count === 1 ? "" : "s"}, a dose above the prescribed amount was logged${upTo}.`;
+}
+
 function medSummary(m: MedicationFacts): string {
   const regimen = m.chosenRegimen ?? m.prescribedRegimen ?? "no regimen recorded";
   let s = `${m.name}: ${regimen}.`;
   if (m.reasonNote) s += ` Note: ${m.reasonNote}.`;
   s += ` ${adherenceSentence(m)}`;
+  s += overDoseSentence(m);
   return s;
 }
 
@@ -204,6 +217,15 @@ export function buildFallbackNarrative(facts: ReportFacts): ClinicalNarrative {
     groups.push(`Labs and measurements — ${labs.map(metricPhrase).join("; ")}.`);
   const diary_observations = groups.join(" ");
 
+  // Interactions — list ONLY the curated records present in the facts (rule #9).
+  const interaction_observations =
+    facts.interactions.length > 0
+      ? `The following ${facts.interactions.length === 1 ? "interaction was" : "interactions were"} noted from curated references and may be worth discussing with a doctor or pharmacist: ` +
+        facts.interactions
+          .map((i) => `${i.aLabel} + ${i.bLabel} (${i.severity}) — ${i.mechanism}`)
+          .join(" ")
+      : "";
+
   const data_caveats =
     facts.period.days < 14
       ? "This is a short reporting period, so trends should be read with caution."
@@ -217,6 +239,7 @@ export function buildFallbackNarrative(facts: ReportFacts): ClinicalNarrative {
     adherence_notes,
     diary_observations,
     correlation_observations: "",
+    interaction_observations,
     data_caveats,
     generatedByLlm: false,
   };

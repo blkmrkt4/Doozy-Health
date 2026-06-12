@@ -221,6 +221,91 @@
   color: #777777;
 }
 
+.report-metric-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.report-metric-stats {
+  margin: 0.15rem 0 0.3rem;
+  font-size: 9.5px;
+  color: #999999;
+  font-variant-numeric: tabular-nums;
+}
+
+.report-scale-panel {
+  margin-bottom: 1.25rem;
+}
+
+/* ── Over-dose note ──────────────────────────────────────────────────── */
+
+.report-overdose {
+  margin: 0.35rem 0 0;
+  font-size: 10px;
+  color: #e6b800;
+}
+
+/* ── Interactions ────────────────────────────────────────────────────── */
+
+.report-interactions-intro {
+  margin: 0 0 0.75rem;
+  font-size: 10px;
+  color: #999999;
+}
+
+.report-interactions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.report-interaction {
+  border: 1px solid #262626;
+  border-left-width: 3px;
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+  margin-bottom: 0.5rem;
+  page-break-inside: avoid;
+}
+
+.report-interaction.sev-serious {
+  border-left-color: #f4ee35;
+}
+.report-interaction.sev-caution {
+  border-left-color: #999999;
+}
+.report-interaction.sev-info {
+  border-left-color: #555555;
+}
+
+.report-interaction-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.report-interaction-pair {
+  font-size: 11px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.report-interaction-sev {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #999999;
+}
+
+.report-interaction-mech {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 10px;
+  color: #cccccc;
+}
+
 /* ── Disclaimer ──────────────────────────────────────────────────────── */
 
 .report-disclaimer {
