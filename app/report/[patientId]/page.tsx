@@ -197,7 +197,7 @@ export default async function ReportPage({
         ) : (
           <p className="report-empty">
             No written summary has been generated for this period yet. Generate
-            one from the export screen, then reopen this report.
+            one from the Snapshot screen, then reopen this report.
           </p>
         )}
         <p className="report-disclaimer">{DISCLAIMER}</p>

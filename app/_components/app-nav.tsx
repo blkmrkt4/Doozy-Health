@@ -17,7 +17,7 @@ type Key =
   | "dashboard"
   | "diary"
   | "add"
-  | "export"
+  | "snapshot"
   | "notifications"
   | "settings";
 
@@ -40,10 +40,10 @@ const icons: Record<string, ReactNode> = {
       <path d="M12 8v8M8 12h8" />
     </svg>
   ),
-  export: (
+  snapshot: (
     <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <path d="M7 10l5 5 5-5M12 15V3" />
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M7 15l3-4 3 3 4-6" />
     </svg>
   ),
   notifications: (
@@ -124,7 +124,7 @@ const PRIMARY: {
   { key: "dashboard", label: "Dashboard", short: "Home", href: "/dashboard" },
   { key: "diary", label: "Diary", href: "/diary" },
   { key: "add", label: "Add", href: "/medications/new", accent: true },
-  { key: "export", label: "Export", href: "/report" },
+  { key: "snapshot", label: "Snapshot", href: "/report" },
   { key: "notifications", label: "Notifications", short: "Alerts", href: "/notifications" },
   { key: "settings", label: "Settings", href: "/settings" },
 ];
@@ -134,8 +134,7 @@ function activeKey(pathname: string): Key | null {
   if (pathname.startsWith("/diary")) return "diary";
   if (pathname.startsWith("/medications/new") || pathname.startsWith("/inventory/new"))
     return "add";
-  if (pathname.startsWith("/report") || pathname === "/settings/export")
-    return "export";
+  if (pathname.startsWith("/report")) return "snapshot";
   if (pathname.startsWith("/notifications")) return "notifications";
   if (pathname.startsWith("/settings")) return "settings";
   return null;

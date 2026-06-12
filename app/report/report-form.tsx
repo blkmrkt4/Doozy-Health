@@ -123,11 +123,11 @@ export function ReportForm({
       </header>
 
       <main className="mx-auto max-w-2xl px-6 py-10 space-y-6">
-        <h1 className="text-xl font-medium tracking-tight">Export report</h1>
+        <h1 className="text-xl font-medium tracking-tight">Health snapshot</h1>
         <p className="text-sm text-faint">
-          Prepare a report for your doctor, coach, or practitioner. Choose a date
-          range, generate the written summary, then view it as a web page or as
-          plain text.
+          A snapshot to share with your doctor, coach, or practitioner. Choose a
+          date range, generate the written summary, then view it as a web page or
+          as plain text.
         </p>
 
         <section className="rounded-md border border-line p-4 space-y-4">

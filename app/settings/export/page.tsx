@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getActivePatient } from "@/lib/active-patient";
 
 // Data export page (PRD §6.2). Records export events in the exports table.
-// For full data download, the user uses the PDF export or contacts support.
+// For a formatted summary to share, the user uses the Health snapshot (/report).
 
 export default async function ExportPage({
   searchParams,
@@ -55,10 +55,10 @@ export default async function ExportPage({
 
         <section className="rounded-md border border-line p-4 space-y-3">
           <p className="text-sm text-faint">
-            You can export all your data at any time. For a formatted report
+            You can export all your data at any time. For a formatted summary
             to share with your clinician, use the{" "}
             <Link href="/report" className="text-accent hover:underline">
-              PDF export
+              Health snapshot
             </Link>
             .
           </p>
