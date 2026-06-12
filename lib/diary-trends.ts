@@ -27,6 +27,7 @@ export type NumericTrend = {
   min: number;
   max: number;
   avg: number;
+  median: number;
   count: number;
 };
 
@@ -96,6 +97,10 @@ function summarize(
     if (points.length === 0) return { kind: "empty" };
     const nums = points.map((p) => p.value);
     const sum = nums.reduce((a, b) => a + b, 0);
+    const sorted = [...nums].sort((a, b) => a - b);
+    const mid = sorted.length >> 1;
+    const median =
+      sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
     return {
       kind: "numeric",
       points,
@@ -103,6 +108,7 @@ function summarize(
       min: Math.min(...nums),
       max: Math.max(...nums),
       avg: sum / nums.length,
+      median,
       count: points.length,
     };
   }

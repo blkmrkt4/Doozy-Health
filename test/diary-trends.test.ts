@@ -19,7 +19,7 @@ function trendFor(id: string, entries: TrendEntry[]) {
 }
 
 describe("buildTrends", () => {
-  it("summarizes numeric fields with range, latest and average", () => {
+  it("summarizes numeric fields with range, latest, average and median", () => {
     const entries: TrendEntry[] = [
       { date: "2026-06-01", field_values: { mood: 3 } },
       { date: "2026-06-02", field_values: { mood: 9 } },
@@ -32,7 +32,20 @@ describe("buildTrends", () => {
     expect(t.max).toBe(9);
     expect(t.latest).toBe(6);
     expect(t.avg).toBe(6);
+    expect(t.median).toBe(6); // sorted [3,6,9] → middle 6
     expect(t.points.map((p) => p.value)).toEqual([3, 9, 6]);
+  });
+
+  it("computes median as the mean of the two middle values when even", () => {
+    const entries: TrendEntry[] = [
+      { date: "2026-06-01", field_values: { mood: 2 } },
+      { date: "2026-06-02", field_values: { mood: 4 } },
+      { date: "2026-06-03", field_values: { mood: 6 } },
+      { date: "2026-06-04", field_values: { mood: 10 } },
+    ];
+    const t = trendFor("mood", entries);
+    if (t.kind !== "numeric") throw new Error("expected numeric");
+    expect(t.median).toBe(5); // sorted [2,4,6,10] → (4+6)/2
   });
 
   it("orders points oldest-first regardless of input order", () => {

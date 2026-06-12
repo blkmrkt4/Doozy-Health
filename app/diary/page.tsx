@@ -2,13 +2,18 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getActivePatient } from "@/lib/active-patient";
-import { buildTrends, type TrendEntry } from "@/lib/diary-trends";
+import {
+  buildTrends,
+  type TrendEntry,
+  type NumericTrend,
+} from "@/lib/diary-trends";
 import { isFieldType, type FieldType, type DiaryFieldValue } from "@/lib/types";
 import {
-  NumericChart,
+  Sparkline,
   BooleanStrip,
   DistributionBars,
 } from "./_components/field-charts";
+import { ScaleChart } from "./_components/scale-chart";
 
 // Diary summary page (PRD §5.9). Day-to-day logging happens on the dashboard
 // calendar's per-day Diary twisty; this page shows what's changing over time —
@@ -83,6 +88,18 @@ export default async function DiaryPage() {
   const trends = buildTrends(fields, entries);
   const hasData = trends.some((t) => t.trend.kind !== "empty");
 
+  // 1–10 scale measures share one chart so correlations are visible; everything
+  // else (numbers with units, yes/no, choices, text) becomes a compact card. A
+  // single lone scale field isn't worth the big panel — it falls back to a card.
+  const scaleForPanel = trends.filter(
+    (t) => t.field.field_type === "scale_1_10" && t.trend.kind === "numeric"
+  );
+  const usePanel = scaleForPanel.length >= 2;
+  const panelIds = new Set(usePanel ? scaleForPanel.map((t) => t.field.id) : []);
+  const compactTrends = trends.filter(
+    (t) => t.trend.kind !== "empty" && !panelIds.has(t.field.id)
+  );
+
   // Recent notes (most recent first), independent of any field.
   const recentNotes = rows
     .filter((r) => r.note && r.note.trim())
@@ -146,75 +163,141 @@ export default async function DiaryPage() {
             Diary section to start recording.
           </p>
         ) : (
-          <section className="space-y-4">
-            {trends.map(({ field, trend }) => {
-              const unit = field.unit ? ` ${field.unit}` : "";
-              return (
-                <article
-                  key={field.id}
-                  className="rounded-md border border-line p-4 space-y-3"
-                >
-                  <div className="flex items-baseline justify-between gap-3">
-                    <h2 className="text-sm font-medium text-paper">
-                      {field.name}
-                      {field.unit ? (
-                        <span className="ml-1 text-xs text-faint">
-                          ({field.unit})
-                        </span>
-                      ) : null}
-                    </h2>
-                    {trend.kind === "numeric" ? (
-                      <p className="text-xs tabular text-muted">
-                        <span className="text-paper">{tidy(trend.latest)}{unit}</span>
-                        <span className="text-faint">
-                          {" "}
-                          · range {tidy(trend.min)}–{tidy(trend.max)} · avg{" "}
-                          {tidy(trend.avg)}
-                        </span>
-                      </p>
-                    ) : trend.kind === "boolean" ? (
-                      <p className="text-xs tabular text-muted">
-                        Yes on{" "}
-                        <span className="text-paper">
-                          {trend.yes} of {trend.total}
-                        </span>{" "}
-                        days
-                      </p>
-                    ) : trend.kind === "distribution" ? (
-                      <p className="text-xs tabular text-faint">
-                        {trend.total} days logged
-                      </p>
-                    ) : null}
-                  </div>
+          <div className="space-y-6">
+            {/* Combined 1–10 scale chart — see how measures move together. */}
+            {usePanel ? (
+              <section className="rounded-md border border-line p-4">
+                <h2 className="text-sm font-medium text-paper">
+                  Scale measures (1–10)
+                </h2>
+                <p className="mt-0.5 text-xs text-faint">
+                  All your 1–10 measures together, so you can see how they move.
+                  Tap a measure to turn its line on or off — the numbers stay
+                  either way.
+                </p>
+                <div className="mt-3">
+                  <ScaleChart
+                    fields={scaleForPanel.map(({ field, trend }) => {
+                      const t = trend as NumericTrend;
+                      return {
+                        id: field.id,
+                        name: field.name,
+                        points: t.points,
+                        avg: t.avg,
+                        median: t.median,
+                        min: t.min,
+                        max: t.max,
+                      };
+                    })}
+                  />
+                </div>
+              </section>
+            ) : null}
 
-                  {trend.kind === "numeric" ? (
-                    <NumericChart
-                      points={trend.points}
-                      yMin={field.field_type === "scale_1_10" ? 1 : undefined}
-                      yMax={field.field_type === "scale_1_10" ? 10 : undefined}
-                    />
-                  ) : trend.kind === "boolean" ? (
-                    <BooleanStrip points={trend.points} />
-                  ) : trend.kind === "distribution" ? (
-                    <DistributionBars counts={trend.counts} total={trend.total} />
-                  ) : trend.kind === "text" ? (
-                    <ul className="space-y-1.5">
-                      {trend.recent.map((r, i) => (
-                        <li key={i} className="text-sm text-paper">
-                          <span className="mr-2 text-xs text-faint tabular">
-                            {shortDate(r.date)}
-                          </span>
-                          {r.text}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-xs text-faint">Nothing logged yet.</p>
-                  )}
-                </article>
-              );
-            })}
-          </section>
+            {/* Everything else — compact mini-cards. */}
+            {compactTrends.length > 0 ? (
+              <section className="space-y-3">
+                {usePanel ? (
+                  <h2 className="text-sm font-medium text-muted">Other measures</h2>
+                ) : null}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {compactTrends.map(({ field, trend }) => (
+                    <article
+                      key={field.id}
+                      className="rounded-md border border-line p-3"
+                    >
+                      <div className="flex items-baseline justify-between gap-2">
+                        <h3 className="text-sm font-medium text-paper">
+                          {field.name}
+                          {field.unit ? (
+                            <span className="ml-1 text-xs text-faint">
+                              ({field.unit})
+                            </span>
+                          ) : null}
+                        </h3>
+                        <span className="text-xs text-faint tabular">
+                          {trend.kind === "numeric"
+                            ? `n=${trend.count}`
+                            : trend.kind === "boolean"
+                              ? `n=${trend.total}`
+                              : trend.kind === "distribution"
+                                ? `${trend.total} days`
+                                : ""}
+                        </span>
+                      </div>
+
+                      {trend.kind === "numeric" ? (
+                        <>
+                          <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs tabular text-faint">
+                            <span>
+                              avg{" "}
+                              <b className="font-semibold text-accent">
+                                {trend.avg.toFixed(1)}
+                              </b>
+                            </span>
+                            <span>
+                              med{" "}
+                              <b className="font-semibold text-accent">
+                                {trend.median.toFixed(1)}
+                              </b>
+                            </span>
+                            <span>
+                              range{" "}
+                              <b className="text-paper">
+                                {tidy(trend.min)}–{tidy(trend.max)}
+                              </b>
+                            </span>
+                            <span>
+                              now <b className="text-paper">{tidy(trend.latest)}</b>
+                            </span>
+                          </div>
+                          <div className="mt-2">
+                            <Sparkline
+                              points={trend.points}
+                              yMin={field.field_type === "scale_1_10" ? 1 : undefined}
+                              yMax={field.field_type === "scale_1_10" ? 10 : undefined}
+                            />
+                          </div>
+                        </>
+                      ) : trend.kind === "boolean" ? (
+                        <>
+                          <div className="mt-1.5 text-xs tabular text-faint">
+                            yes{" "}
+                            <b className="font-semibold text-accent">
+                              {trend.yes}/{trend.total}
+                            </b>{" "}
+                            · that&rsquo;s{" "}
+                            <b className="text-paper">
+                              {Math.round((trend.yes / trend.total) * 100)}%
+                            </b>{" "}
+                            of days
+                          </div>
+                          <div className="mt-2">
+                            <BooleanStrip points={trend.points} />
+                          </div>
+                        </>
+                      ) : trend.kind === "distribution" ? (
+                        <div className="mt-2">
+                          <DistributionBars counts={trend.counts} total={trend.total} />
+                        </div>
+                      ) : trend.kind === "text" ? (
+                        <ul className="mt-2 space-y-1">
+                          {trend.recent.slice(0, 3).map((r, i) => (
+                            <li key={i} className="text-xs text-paper">
+                              <span className="mr-2 text-faint tabular">
+                                {shortDate(r.date)}
+                              </span>
+                              {r.text}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+          </div>
         )}
 
         {/* Day notes journal */}

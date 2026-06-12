@@ -128,6 +128,53 @@ export function NumericChart({
   );
 }
 
+// Compact sparkline for the diary's mini-cards (PRD §5.9). A small line + area,
+// no axes or labels — the numbers live beside it. Uniform scaling keeps the
+// last-value dot round. American English.
+export function Sparkline({
+  points,
+  yMin,
+  yMax,
+}: {
+  points: { date: string; value: number }[];
+  yMin?: number;
+  yMax?: number;
+}) {
+  if (points.length === 0) return null;
+
+  const W = 300;
+  const H = 46;
+  const P = 3;
+  const vals = points.map((p) => p.value);
+  const dataMin = Math.min(...vals);
+  const dataMax = Math.max(...vals);
+  const vMin = yMin ?? (dataMin === dataMax ? dataMin - 1 : dataMin);
+  const vMax = yMax ?? (dataMin === dataMax ? dataMax + 1 : dataMax);
+  const vRange = vMax - vMin || 1;
+
+  const x = (i: number) =>
+    points.length === 1 ? W / 2 : P + (i / (points.length - 1)) * (W - 2 * P);
+  const y = (v: number) => P + (1 - (v - vMin) / vRange) * (H - 2 * P);
+
+  const line = points
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${x(i).toFixed(1)} ${y(p.value).toFixed(1)}`)
+    .join(" ");
+  const area =
+    `${line} L ${x(points.length - 1).toFixed(1)} ${H - P} ` +
+    `L ${x(0).toFixed(1)} ${H - P} Z`;
+  const li = points.length - 1;
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 46 }}>
+      {points.length > 1 ? <path d={area} fill={ACCENT} opacity="0.08" /> : null}
+      {points.length > 1 ? (
+        <path d={line} fill="none" stroke={ACCENT} strokeWidth="2" />
+      ) : null}
+      <circle cx={x(li)} cy={y(points[li].value)} r="2.6" fill={ACCENT} />
+    </svg>
+  );
+}
+
 export function BooleanStrip({
   points,
 }: {
