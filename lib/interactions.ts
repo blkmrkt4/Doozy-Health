@@ -91,6 +91,14 @@ export type InteractionFact = {
   mechanism: string;
   aLabel: string;
   bLabel: string;
+  /** Canonical drug ids for the pair — lets downstream consumers (e.g. the
+   *  notifications dedupe key) identify the pair without parsing labels. */
+  aDrugId: string;
+  bDrugId: string;
+  /** True when that side entered the set as a diary-tracked substance
+   *  (alcohol/caffeine/nicotine) rather than a medication. */
+  aIsSubstance: boolean;
+  bIsSubstance: boolean;
 };
 
 /**
@@ -99,18 +107,23 @@ export type InteractionFact = {
  * Generalizes checkInteractions, which is per-drug. Ground truth is the curated
  * drug_interactions table only — never the LLM (hard rule #9).
  *
- * `items` carries a display label per drug id (e.g. "alcohol (tracked in diary)").
- * Pairs are deduped; results are ordered serious → caution → info.
+ * `items` carries a display label per drug id (e.g. "alcohol (tracked in diary)")
+ * plus an optional `kind` marking diary-tracked substances (defaults to
+ * "medication"). Pairs are deduped; results are ordered serious → caution → info.
  */
 export async function findInteractionsAmong(
   supabase: SupabaseClient,
-  items: { drugId: string; label: string }[]
+  items: { drugId: string; label: string; kind?: "medication" | "substance" }[]
 ): Promise<InteractionFact[]> {
-  // Unique drug ids, with a label for each (first label wins).
+  // Unique drug ids, with a label/kind for each (first entry wins).
   const labelByDrug = new Map<string, string>();
+  const kindByDrug = new Map<string, "medication" | "substance">();
   for (const it of items) {
     if (!it.drugId) continue;
-    if (!labelByDrug.has(it.drugId)) labelByDrug.set(it.drugId, it.label);
+    if (!labelByDrug.has(it.drugId)) {
+      labelByDrug.set(it.drugId, it.label);
+      kindByDrug.set(it.drugId, it.kind ?? "medication");
+    }
   }
   const drugIds = [...labelByDrug.keys()];
   if (drugIds.length < 2) return [];
@@ -136,6 +149,10 @@ export async function findInteractionsAmong(
       mechanism: row.mechanism as string,
       aLabel: labelByDrug.get(a) ?? "Unknown",
       bLabel: labelByDrug.get(b) ?? "Unknown",
+      aDrugId: a,
+      bDrugId: b,
+      aIsSubstance: kindByDrug.get(a) === "substance",
+      bIsSubstance: kindByDrug.get(b) === "substance",
     });
   }
 

@@ -83,6 +83,14 @@ export default async function NewSyringePage({
               <input type="text" name="unit_markings" placeholder="e.g. 0.01 mL increments" className={inputCls} />
             </label>
           </div>
+          <label className={labelCls}>
+            How many do you have?
+            <input type="number" name="quantity" min={0} step={1} inputMode="numeric" className={`${inputCls} tabular`} />
+            <span className="mt-1 block text-xs text-faint">
+              Optional. With a count, the supply estimate can note when this is
+              projected to run out, based on what you log.
+            </span>
+          </label>
           <button
             type="submit"
             className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent transition-opacity hover:opacity-90"

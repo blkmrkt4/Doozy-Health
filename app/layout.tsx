@@ -4,6 +4,7 @@ import { DisclaimerFooter } from "./_components/disclaimer-footer";
 import { AppNav } from "./_components/app-nav";
 import { createClient } from "@/lib/supabase/server";
 import { getActivePatient } from "@/lib/active-patient";
+import { getUnreadNotificationCount } from "@/lib/notifications-server";
 
 export const metadata: Metadata = {
   title: "WellKept",
@@ -44,15 +45,21 @@ export default async function RootLayout({
   children: React.ReactNode;
 }) {
   // The nav needs to know who's signed in (and renders nothing when nobody is),
-  // plus whether they own the active patient (to gate owner-only menu items).
+  // whether they own the active patient (to gate owner-only menu items), and
+  // how many notifications they haven't read (the bell dot). Server actions
+  // revalidate paths, so the dot refreshes after the writes that create rows.
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   let isOwner = false;
+  let unreadCount = 0;
   if (user) {
     const active = await getActivePatient(supabase);
     isOwner = active?.role === "owner";
+    if (active) {
+      unreadCount = await getUnreadNotificationCount(supabase, active.id);
+    }
   }
 
   return (
@@ -62,7 +69,11 @@ export default async function RootLayout({
       </head>
       <body className="flex min-h-screen flex-col bg-ink text-paper antialiased">
         {/* Global hybrid nav — self-hides on public/print/admin routes. */}
-        <AppNav userEmail={user?.email ?? null} isOwner={isOwner} />
+        <AppNav
+          userEmail={user?.email ?? null}
+          isOwner={isOwner}
+          unreadCount={unreadCount}
+        />
         {/* The disclaimer footer is global so it cannot be omitted from any
             screen — PRD §6.1 requires it everywhere. */}
         <div className="flex-1">{children}</div>

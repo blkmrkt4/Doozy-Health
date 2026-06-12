@@ -149,6 +149,10 @@ describe("buildFallbackNarrative", () => {
           mechanism: "Both act on the central nervous system; combined use can increase drowsiness.",
           aLabel: "alcohol (tracked in diary)",
           bLabel: "citalopram",
+          aDrugId: "drug-alcohol",
+          bDrugId: "drug-citalopram",
+          aIsSubstance: true,
+          bIsSubstance: false,
         },
       ],
     };

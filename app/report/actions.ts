@@ -5,6 +5,8 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { buildReportData } from "@/lib/report/report-data";
 import { generateReportNarrative, type ClinicalNarrative } from "@/lib/report/narrative";
+import { onSnapshotGenerated } from "@/lib/notifications-server";
+import { logError } from "@/lib/log";
 
 // Server action behind the report's "Generate summary" button (PRD §5.10.1).
 // Runs the LLM ONCE and caches the narrative in report_summaries so the HTML
@@ -46,19 +48,36 @@ export async function generateClinicalSummary(
   const data = await buildReportData(supabase, patientId, from, to);
   const { narrative, modelUsed } = await generateReportNarrative(data.facts);
 
-  const { error } = await supabase.from("report_summaries").upsert(
-    {
-      patient_id: patientId,
-      from_date: from,
-      to_date: to,
-      facts_hash: factsHash(data.facts),
-      summary: narrative,
-      model_used: modelUsed,
-      generated_by_user_id: user.id,
-    },
-    { onConflict: "patient_id,from_date,to_date" }
-  );
+  const { data: saved, error } = await supabase
+    .from("report_summaries")
+    .upsert(
+      {
+        patient_id: patientId,
+        from_date: from,
+        to_date: to,
+        facts_hash: factsHash(data.facts),
+        summary: narrative,
+        model_used: modelUsed,
+        generated_by_user_id: user.id,
+      },
+      { onConflict: "patient_id,from_date,to_date" }
+    )
+    .select("id")
+    .single();
   if (error) return { ok: false, error: "Could not save the summary. Please try again." };
+
+  // Notifications from the DETERMINISTIC findings (curated interactions,
+  // doses above the regimen on record) — never the narrative. Fire-and-forget:
+  // the snapshot already saved, so this must not fail the action.
+  try {
+    await onSnapshotGenerated({
+      patientId,
+      reportSummaryId: saved?.id ?? null,
+      data,
+    });
+  } catch (err) {
+    logError("notifications", "post-snapshot evaluation failed", err, { patientId });
+  }
 
   revalidatePath(`/report/${patientId}`);
   return { ok: true, narrative, generatedAt: new Date().toISOString() };

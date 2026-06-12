@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getActivePatient } from "@/lib/active-patient";
-import { archiveSyringe } from "@/app/inventory/actions";
+import { archiveSyringe, setInventoryQuantity } from "@/app/inventory/actions";
 import { unarchiveMedication } from "@/app/medications/actions";
 import { MedDoseRow } from "@/app/_components/med-dose-row";
 import { dayKey, frequencyIntervalMs, occurrencesInWindow } from "@/lib/schedule";
@@ -506,7 +506,7 @@ export default async function DashboardPage({
   // Syringe inventory (PRD §5.1) — supplies on hand, shown as inventory rows.
   const { data: inventoryRows } = await supabase
     .from("inventory_items")
-    .select("id, label, category, spec")
+    .select("id, label, category, spec, quantity")
     .eq("archived", false)
     .order("created_at", { ascending: false });
   const syringes = (inventoryRows ?? []) as Array<{
@@ -519,6 +519,7 @@ export default async function DashboardPage({
       needle_length_in?: number;
       unit_markings?: string;
     } | null;
+    quantity: string | number | null;
   }>;
 
   return (
@@ -770,13 +771,47 @@ export default async function DashboardPage({
                       <span className="min-w-0 flex-1 truncate text-paper blur-private">
                         {s.label}
                       </span>
-                      <span className="text-xs text-faint">on hand</span>
+                      {/* Neutral record of the count — a number, never a prompt. */}
+                      <span className="text-xs tabular-nums text-faint">
+                        {s.quantity != null
+                          ? `${Number(s.quantity)} on hand`
+                          : "count not tracked"}
+                      </span>
                     </summary>
                     <div className="mt-2 space-y-1 pl-1 text-xs text-faint">
                       {s.spec?.capacity_mL ? <p>Capacity: {s.spec.capacity_mL} mL</p> : null}
                       {s.spec?.needle_gauge ? <p>Needle gauge: {s.spec.needle_gauge}G</p> : null}
                       {s.spec?.needle_length_in ? <p>Needle length: {s.spec.needle_length_in} in</p> : null}
                       {s.spec?.unit_markings ? <p>Markings: {s.spec.unit_markings}</p> : null}
+                      {isOwner ? (
+                        <form
+                          action={setInventoryQuantity}
+                          className="flex items-center gap-2 pt-1"
+                        >
+                          <input type="hidden" name="syringe_id" value={s.id} />
+                          <input type="hidden" name="return_to" value="/dashboard" />
+                          <label htmlFor={`qty-${s.id}`} className="text-faint">
+                            Count on hand
+                          </label>
+                          <input
+                            id={`qty-${s.id}`}
+                            name="quantity"
+                            type="number"
+                            min={0}
+                            step={1}
+                            inputMode="numeric"
+                            defaultValue={s.quantity != null ? Number(s.quantity) : ""}
+                            placeholder="—"
+                            className="w-20 rounded border border-line bg-surface px-2 py-1 text-right tabular-nums text-paper"
+                          />
+                          <button
+                            type="submit"
+                            className="text-faint underline hover:text-muted"
+                          >
+                            Save
+                          </button>
+                        </form>
+                      ) : null}
                       {isOwner ? (
                         <form action={archiveSyringe} className="pt-1">
                           <input type="hidden" name="syringe_id" value={s.id} />

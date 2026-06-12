@@ -157,9 +157,12 @@ const PRIVACY_KEY = "doozy_privacy_mode";
 export function AppNav({
   userEmail,
   isOwner,
+  unreadCount = 0,
 }: {
   userEmail: string | null;
   isOwner: boolean;
+  /** Unread notifications for the active patient — drives the bell dot. */
+  unreadCount?: number;
 }) {
   const pathname = usePathname() ?? "";
   const [open, setOpen] = useState(false);
@@ -201,6 +204,18 @@ export function AppNav({
   if (!shown) return null;
 
   const current = activeKey(pathname);
+
+  // Unread marker on the bell — a quiet dot, no count, no animation (PRD §9).
+  const dot = (
+    <span
+      aria-hidden
+      className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-[var(--color-danger-text)]"
+    />
+  );
+  const navLabel = (item: { key: Key; label: string }) =>
+    item.key === "notifications" && unreadCount > 0
+      ? `${item.label}, ${unreadCount} unread`
+      : item.label;
 
   function togglePrivacy() {
     const next = !privacy;
@@ -265,13 +280,14 @@ export function AppNav({
                   {i === 1 ? <span className="mx-1 h-6 w-px bg-line" /> : null}
                   <Link
                     href={item.href}
-                    aria-label={item.label}
+                    aria-label={navLabel(item)}
                     title={item.label}
                     aria-current={isActive ? "page" : undefined}
                     className={`group inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl border px-2.5 transition-colors ${container}`}
                   >
-                    <span className={`flex h-6 w-6 shrink-0 items-center justify-center ${iconTone}`}>
+                    <span className={`relative flex h-6 w-6 shrink-0 items-center justify-center ${iconTone}`}>
                       {icons[item.key]}
+                      {item.key === "notifications" && unreadCount > 0 ? dot : null}
                     </span>
                     <span
                       className={`overflow-hidden whitespace-nowrap text-sm font-medium transition-all duration-300 ${labelState}`}
@@ -308,11 +324,14 @@ export function AppNav({
               <Link
                 key={item.key}
                 href={item.href}
-                aria-label={item.label}
+                aria-label={navLabel(item)}
                 aria-current={isActive ? "page" : undefined}
                 className={`flex min-h-[44px] min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-0.5 py-1.5 transition-colors ${tone}`}
               >
-                <span className="flex items-center justify-center">{icons[item.key]}</span>
+                <span className="relative flex items-center justify-center">
+                  {icons[item.key]}
+                  {item.key === "notifications" && unreadCount > 0 ? dot : null}
+                </span>
                 <span className="max-w-full truncate text-[10px] leading-none">
                   {item.short ?? item.label}
                 </span>

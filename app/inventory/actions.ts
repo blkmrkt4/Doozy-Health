@@ -69,12 +69,21 @@ async function requireOwner() {
   return { supabase, user, active };
 }
 
+/** Optional count-on-hand from a form field; null = not tracked. */
+function parseQuantity(formData: FormData): number | null {
+  const raw = str(formData, "quantity");
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 /** Manual create (no photo, or with an already-uploaded photo_document_id). */
 export async function createSyringe(formData: FormData) {
   const { supabase, active } = await requireOwner();
   const spec = buildSpec(formData);
   const label = str(formData, "label") || defaultLabel(spec);
   const photoDocId = str(formData, "photo_document_id") || null;
+  const quantity = parseQuantity(formData);
 
   const { error } = await supabase.from("inventory_items").insert({
     patient_id: active.id,
@@ -82,6 +91,9 @@ export async function createSyringe(formData: FormData) {
     label,
     spec,
     photo_document_id: photoDocId,
+    ...(quantity != null
+      ? { quantity, quantity_set_at: new Date().toISOString() }
+      : {}),
   });
   if (error) failNewSyringe(`Could not save the syringe: ${error.message}`);
 
@@ -149,6 +161,7 @@ export async function confirmSyringeExtraction(formData: FormData) {
   const spec = buildSpec(formData);
   const label = str(formData, "label") || defaultLabel(spec);
 
+  const quantity = parseQuantity(formData);
   const { data: inserted, error } = await supabase
     .from("inventory_items")
     .insert({
@@ -157,6 +170,9 @@ export async function confirmSyringeExtraction(formData: FormData) {
       label,
       spec,
       photo_document_id: docId || null,
+      ...(quantity != null
+        ? { quantity, quantity_set_at: new Date().toISOString() }
+        : {}),
     })
     .select("id")
     .single();
@@ -229,6 +245,35 @@ export async function updateSyringe(formData: FormData) {
     .update({ label, spec })
     .eq("id", id);
   if (error) failNewSyringe(`Could not update the syringe: ${error.message}`);
+
+  revalidatePath("/dashboard");
+  redirect(str(formData, "return_to") || "/dashboard");
+}
+
+/**
+ * Set or clear the count on hand for a supply item (owner-only via RLS).
+ * Stamps quantity_set_at — that timestamp anchors the usage-rate window and
+ * opens a fresh low-supply notification bucket (a recount may notify again).
+ */
+export async function setInventoryQuantity(formData: FormData) {
+  const { supabase } = await requireOwner();
+  const id = str(formData, "syringe_id");
+  if (!id) failNewSyringe("Missing item.");
+
+  const raw = str(formData, "quantity");
+  let update: { quantity: number | null; quantity_set_at: string | null };
+  if (!raw) {
+    update = { quantity: null, quantity_set_at: null }; // stop tracking
+  } else {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) {
+      failNewSyringe("Enter a count of zero or more.");
+    }
+    update = { quantity: n, quantity_set_at: new Date().toISOString() };
+  }
+
+  const { error } = await supabase.from("inventory_items").update(update).eq("id", id);
+  if (error) failNewSyringe(`Could not update the count: ${error.message}`);
 
   revalidatePath("/dashboard");
   redirect(str(formData, "return_to") || "/dashboard");

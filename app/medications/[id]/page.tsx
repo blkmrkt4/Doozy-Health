@@ -18,12 +18,8 @@ import {
   provenanceFromReferenceData,
   type DrugPK,
 } from "@/lib/pk/amountInSystem";
-import {
-  projectRunOut,
-  consumedFromLogs,
-  formatRunOut,
-  type RunOut,
-} from "@/lib/supply";
+import { formatRunOut, type RunOut } from "@/lib/supply";
+import { loadMedicationRunOut } from "@/lib/supply-projection";
 import { templatesForDrug } from "@/lib/diary-templates";
 import { TemplateSuggestion } from "@/app/medications/_components/template-suggestion";
 import {
@@ -83,6 +79,7 @@ type Regimen = {
 };
 
 type DeliveryForm = {
+  id: string;
   form_type: string;
   concentration: {
     amount: number;
@@ -225,34 +222,13 @@ export default async function MedicationDetailPage({
   // Supply projection (PRD §5.3): how much is left and roughly when it runs out,
   // from the package count minus what's actually been logged since this fill.
   // Logged-dose based, so under/over-dosing moves the date. Estimate only.
-  let runOut: RunOut | null = null;
-  if (delivery?.package_count && chosen && isFrequency(chosen.frequency)) {
-    const { data: supplyLogs } = await supabase
-      .from("dose_logs")
-      .select("amount, unit")
-      .eq("medication_id", med.id)
-      .in("event_type", ["taken", "prn"])
-      .not("amount", "is", null)
-      .gte("logged_at", delivery.created_at);
-    const consumed = consumedFromLogs(
-      supplyLogs ?? [],
-      chosen.dose_unit,
-      delivery.package_unit,
-      delivery.concentration
-    );
-    runOut = projectRunOut({
-      packageCount: Number(delivery.package_count),
-      packageUnit: delivery.package_unit,
-      concentration: delivery.concentration,
-      regimen: {
-        doseAmount: Number(chosen.dose_amount),
-        doseUnit: chosen.dose_unit,
-        frequency: chosen.frequency,
-      },
-      consumed,
-      now: Date.now(),
-    });
-  }
+  // Shared with the post-dose-log notification evaluator so the two can't drift.
+  const runOut: RunOut | null = await loadMedicationRunOut(
+    supabase,
+    med.id,
+    delivery,
+    chosen
+  );
 
   // Single-medication calendar (PRD §5.4): the date-wheel + adherence heatmap
   // for this medication. The grade is a factual record of logged-vs-scheduled.

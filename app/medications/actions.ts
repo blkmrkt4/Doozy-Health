@@ -42,8 +42,27 @@ import { accessoriesFromRequiredComponents } from "@/lib/medication-setup";
 import { resolveOrCreateCanonicalDrug } from "@/lib/drug-reference";
 import { generateReminders } from "@/lib/reminders";
 import { explainInteraction } from "@/lib/interactions";
+import { onDoseLogged, onDoseLogDeleted } from "@/lib/notifications-server";
 import { nextMedColour } from "@/lib/colours";
-import { logWarn } from "@/lib/log";
+import { logWarn, logError } from "@/lib/log";
+
+/**
+ * Post-dose-log evaluation (syringe decrement + low-supply notifications),
+ * fire-and-forget: the dose log already committed, so a notification problem
+ * must never surface to the user or block the redirect. Ids only in the log
+ * line (hard rule #12).
+ */
+async function evaluateDoseLogged(
+  supabase: SupabaseClient,
+  medicationId: string,
+  route: string | null
+): Promise<void> {
+  try {
+    await onDoseLogged({ supabase, medicationId, route });
+  } catch (err) {
+    logError("notifications", "post-dose-log evaluation failed", err, { medicationId });
+  }
+}
 
 function failNew(message: string): never {
   redirect(`/medications/new?error=${encodeURIComponent(message)}`);
@@ -701,6 +720,8 @@ export async function logScheduledDose(formData: FormData) {
   });
   if (error) failDose(medicationId, `Could not log the dose: ${error.message}`);
 
+  await evaluateDoseLogged(supabase, medicationId, (chosen.route as string | null) ?? null);
+
   revalidatePath("/dashboard");
   revalidatePath(`/medications/${medicationId}`);
   redirect(returnTo);
@@ -782,6 +803,10 @@ export async function logDose(formData: FormData) {
 
   const { error } = await supabase.from("dose_logs").insert(row);
   if (error) failDose(medicationId, `Could not log the dose: ${error.message}`);
+
+  if (eventType !== "skipped") {
+    await evaluateDoseLogged(supabase, medicationId, (row.route_taken as string | null) ?? null);
+  }
 
   revalidatePath("/dashboard");
   revalidatePath(`/medications/${medicationId}`);
@@ -898,8 +923,27 @@ export async function deleteDoseLog(formData: FormData) {
   const logId = str(formData, "log_id");
   const returnTo = str(formData, "return_to") || `/medications/${medicationId}`;
 
+  // Read the log before deleting it — the syringe-count restore needs to know
+  // whether the removed dose was an injection.
+  const { data: log } = await supabase
+    .from("dose_logs")
+    .select("event_type, route_taken")
+    .eq("id", logId)
+    .maybeSingle();
+
   const { error } = await supabase.from("dose_logs").delete().eq("id", logId);
   if (error) failDose(medicationId, `Could not remove the log: ${error.message}`);
+
+  try {
+    await onDoseLogDeleted({
+      supabase,
+      medicationId,
+      eventType: (log?.event_type as string | null) ?? null,
+      routeTaken: (log?.route_taken as string | null) ?? null,
+    });
+  } catch (err) {
+    logError("notifications", "post-dose-delete evaluation failed", err, { medicationId });
+  }
 
   revalidatePath("/dashboard");
   revalidatePath(`/medications/${medicationId}`);
@@ -955,7 +999,8 @@ export async function quickLogDose(formData: FormData) {
   };
   if (loggedAt) row.logged_at = loggedAt;
 
-  await supabase.from("dose_logs").insert(row);
+  const { error } = await supabase.from("dose_logs").insert(row);
+  if (!error) await evaluateDoseLogged(supabase, medicationId, route ?? null);
   revalidatePath("/dashboard");
   revalidatePath(`/medications/${medicationId}`);
 }
@@ -971,7 +1016,26 @@ export async function quickUnlogDose(formData: FormData) {
   const logId = str(formData, "log_id");
   if (!logId) return;
 
-  await supabase.from("dose_logs").delete().eq("id", logId);
+  // Read before delete — the syringe-count restore needs the route.
+  const { data: log } = await supabase
+    .from("dose_logs")
+    .select("event_type, route_taken")
+    .eq("id", logId)
+    .maybeSingle();
+
+  const { error } = await supabase.from("dose_logs").delete().eq("id", logId);
+  if (!error) {
+    try {
+      await onDoseLogDeleted({
+        supabase,
+        medicationId,
+        eventType: (log?.event_type as string | null) ?? null,
+        routeTaken: (log?.route_taken as string | null) ?? null,
+      });
+    } catch (err) {
+      logError("notifications", "post-dose-delete evaluation failed", err, { medicationId });
+    }
+  }
   revalidatePath("/dashboard");
   revalidatePath(`/medications/${medicationId}`);
 }

@@ -34,6 +34,9 @@ export type MedicationRow = {
   canonical_drug_id: string | null;
   colour: string | null;
   single_use?: boolean;
+  /** Needed by notification privacy routing (a private med's interaction
+   *  notification must carry that medication_id so RLS hides it). */
+  is_private?: boolean;
   prescribed_regimens:
     | {
         dose_amount: string;
@@ -734,7 +737,7 @@ export async function loadReportRows(
       supabase
         .from("medications")
         .select(
-          "id, display_name, canonical_drug_id, colour, single_use, " +
+          "id, display_name, canonical_drug_id, colour, single_use, is_private, " +
             "prescribed_regimens(dose_amount, dose_unit, route, frequency, prescriber_name), " +
             "delivery_forms(form_type, concentration, manufacturer, expiry_date, batch), " +
             "chosen_regimens(dose_amount, dose_unit, route, frequency, active, reason_note, created_at)"
@@ -809,11 +812,13 @@ async function gatherInteractions(
   rows: ReportRows,
   data: ReportData
 ): Promise<InteractionFact[]> {
-  const items: { drugId: string; label: string }[] = [];
+  const items: { drugId: string; label: string; kind: "medication" | "substance" }[] = [];
 
   // Active medications with a resolved canonical drug.
   for (const m of rows.medications) {
-    if (m.canonical_drug_id) items.push({ drugId: m.canonical_drug_id, label: m.display_name });
+    if (m.canonical_drug_id) {
+      items.push({ drugId: m.canonical_drug_id, label: m.display_name, kind: "medication" });
+    }
   }
 
   // Substances tracked in the diary → their canonical drug rows.
@@ -833,6 +838,7 @@ async function gatherInteractions(
       items.push({
         drugId: r.id as string,
         label: `${r.canonical_name as string} (tracked in diary)`,
+        kind: "substance",
       });
     }
   }
