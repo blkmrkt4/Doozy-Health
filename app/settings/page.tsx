@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getActivePatient } from "@/lib/active-patient";
 
-// Settings hub page. Links to sub-pages (caregivers, future: profile, export).
+// Settings hub page. Links to sub-pages (caregivers, tracking, the Health
+// snapshot, account).
 
 export default async function SettingsPage() {
   const supabase = await createClient();
@@ -59,12 +60,13 @@ export default async function SettingsPage() {
             </>
           ) : null}
           <Link
-            href="/settings/export"
+            href="/report"
             className="block rounded-md border border-line p-4 hover:border-muted"
           >
-            <h2 className="text-sm font-medium text-paper">Export data</h2>
+            <h2 className="text-sm font-medium text-paper">Health snapshot</h2>
             <p className="mt-1 text-xs text-faint">
-              Download your data or generate a PDF report for your clinician.
+              Build a shareable summary of {active.name}&rsquo;s medications,
+              doses, and tracked measures to bring to a doctor.
             </p>
           </Link>
           <Link

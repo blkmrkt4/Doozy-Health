@@ -142,7 +142,7 @@ export default async function DiaryPage() {
                 href="/settings/tracking"
                 className="rounded-md border border-line px-3 py-1.5 text-sm text-muted transition-colors hover:bg-surface"
               >
-                Modify diary
+                Adjust Tracking
               </Link>
             ) : null}
           </div>

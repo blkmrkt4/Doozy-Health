@@ -6,6 +6,13 @@
   font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
   color: #ffffff;
   background: #000000;
+  /* Constrain to a printable page measure and centre it. Without this the
+     column runs the full viewport width on a desktop, and the w-full SVG
+     charts (designed at ~680px) scale up to fill it — the "massive graphs".
+     At ~46rem the inner column is ~680px, so the charts render at their
+     native size and the page reads like the diary it mirrors. */
+  max-width: 46rem;
+  margin-inline: auto;
   padding: 2rem;
   font-size: 11px;
   line-height: 1.5;
@@ -206,8 +213,13 @@
   margin: 0 0 0.5rem;
 }
 
+/* Mini-cards mirror the diary's bordered tiles. Spacing comes from the grid
+   gap, so no margin here. */
 .report-metric {
-  margin-bottom: 0.75rem;
+  margin: 0;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid #262626;
+  border-radius: 6px;
   page-break-inside: avoid;
 }
 
@@ -234,8 +246,16 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The combined 1–10 panel as a bordered card, like the diary's. */
 .report-scale-panel {
   margin-bottom: 1.25rem;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid #262626;
+  border-radius: 6px;
+}
+
+.report-scale-panel .report-metric-heading {
+  margin-bottom: 0.75rem;
 }
 
 /* ── Over-dose note ──────────────────────────────────────────────────── */
