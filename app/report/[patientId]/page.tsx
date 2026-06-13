@@ -11,6 +11,7 @@ import { type ClinicalNarrative } from "@/lib/report/narrative";
 import { AmountInSystemChart } from "@/app/_components/amount-in-system-chart";
 import { Sparkline, BooleanStrip, DistributionBars } from "@/app/diary/_components/field-charts";
 import { ScaleChart, type ScaleSeries } from "@/app/diary/_components/scale-chart";
+import { PrintButton } from "./print-button";
 import "./report.css";
 
 // Doctor "Snapshot" report (PRD §5.10, §5.10.1). Server-rendered HTML viewed in
@@ -178,12 +179,17 @@ export default async function ReportPage({
 
   return (
     <div className="report">
-      {/* Screen-only nav back to the export config; hidden in the PDF. */}
+      {/* Screen-only nav back to the snapshot config; hidden in print/PDF. */}
       <nav className="report-nav">
         <a href="/report" className="report-nav-link">
           ← Back to WellKept
         </a>
       </nav>
+
+      {/* Screen-only "Save as PDF" — client-side browser print (hidden in print). */}
+      <div className="report-print-actions">
+        <PrintButton />
+      </div>
 
       {/* ── Cover ──────────────────────────────────────────────── */}
       <section className="report-cover">

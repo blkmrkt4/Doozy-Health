@@ -16,6 +16,21 @@
   padding: 2rem;
   font-size: 11px;
   line-height: 1.5;
+
+  /* The report is always dark, by design — independent of the app's light/dark
+     theme. The shared chart components read these tokens (grid lines, axis
+     labels, mini-card surfaces), so pin them to the dark palette here. Without
+     this, opening the report while the app is in light theme renders chart
+     labels in near-black on the black page. It also lets the chart cards stay
+     dark in the print stylesheet while the rest of the page goes white. */
+  --color-ink: #000000;
+  --color-paper: #ffffff;
+  --color-muted: #cccccc;
+  --color-faint: #777777;
+  --color-line: #262626;
+  --color-surface: #0e0e0e;
+  --color-accent: #f4ee35;
+  --color-on-accent: #141104;
 }
 
 /* ── Screen-only nav ─────────────────────────────────────────────────── */
@@ -40,6 +55,32 @@
 }
 
 .report-nav-link:hover {
+  opacity: 0.9;
+}
+
+/* ── Screen-only print action ────────────────────────────────────────── */
+
+.report-print-actions {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 50;
+}
+
+.report-print-btn {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 500;
+  color: #000000;
+  background: #f4ee35;
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+.report-print-btn:hover {
   opacity: 0.9;
 }
 
@@ -338,15 +379,140 @@
 
 /* ── Print media ─────────────────────────────────────────────────────── */
 
+/* ── Print / "Save as PDF" ───────────────────────────────────────────────
+   Rendered client-side by the browser's own print engine (window.print()),
+   so it works on any host — no server-side PDF/Chromium, which is what failed
+   on Vercel's hobby plan. The page flips to an ink-friendly white sheet with
+   dark text and tables (the bulk a clinician reads), while the chart cards
+   stay dark: the chart palette is built for a dark background, and the bright
+   identity colours would vanish on white. print-color-adjust: exact forces
+   those dark panels (and their coloured lines) to actually print. */
 @media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
   .report {
-    background: #000000 !important;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    background: #ffffff;
+    color: #1a1a1a;
+    font-size: 10.5px;
+  }
+
+  /* Screen-only chrome never reaches paper / the PDF. */
+  .report-nav,
+  .report-print-actions {
+    display: none !important;
+  }
+
+  /* Headings / brand: the yellow accent is invisible on white → ink. */
+  .report-title,
+  .report-subtitle,
+  .report-heading,
+  .report-med-name,
+  .report-summary-label,
+  .report-interaction-pair {
+    color: #111111;
+  }
+  .report-heading {
+    border-bottom-color: #cccccc;
+  }
+  .report-cover {
+    border-bottom-color: #cccccc;
+    padding: 1.5rem 0 1rem;
+    page-break-after: auto; /* no wasted cover sheet for a short handout */
+  }
+
+  /* Body copy: lighten-on-dark greys → darken-on-white. */
+  .report-summary p,
+  .report-med-narrative {
+    color: #222222;
+  }
+  .report-dates,
+  .report-adherence,
+  .report-interaction-mech {
+    color: #333333;
+  }
+  .report-generated,
+  .report-empty,
+  .report-summary-caveat,
+  .report-summary-stamp,
+  .report-interactions-intro,
+  .report-disclaimer {
+    color: #666666;
+  }
+  .report-overdose {
+    color: #8a5a00; /* readable amber on white — informational, not alarm */
+  }
+
+  /* Tables: dark text, hairline grey rules. */
+  .report-table td {
+    color: #222222;
+    border-bottom-color: #e5e5e5;
+  }
+  .report-table th {
+    color: #555555;
+    border-bottom-color: #cccccc;
+  }
+  .report-label {
+    color: #666666;
+  }
+  .report-med {
+    border-color: #cccccc;
+  }
+  .report-disclaimer {
+    border-top-color: #cccccc;
+  }
+
+  /* MeasureGroup headings sit on the white page → ink. */
+  .report-metric-heading {
+    color: #333333;
+  }
+
+  /* Interactions: keep severity weight via greys (no red — §6.1). */
+  .report-interaction {
+    border-color: #cccccc;
+  }
+  .report-interaction.sev-serious {
+    border-left-color: #111111;
+  }
+  .report-interaction.sev-caution {
+    border-left-color: #888888;
+  }
+  .report-interaction.sev-info {
+    border-left-color: #cccccc;
+  }
+  .report-interaction-sev {
+    color: #555555;
+  }
+
+  /* Chart cards stay DARK so the bright identity lines remain legible. The
+     pinned tokens on .report keep their inner labels light. */
+  .report-scale-panel,
+  .report-metric,
+  .report-chart {
+    background: #000000;
+    border-color: #1f1f1f;
+    border-radius: 6px;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
+  .report-chart {
+    padding: 0.5rem;
+  }
+  /* The scale card's own title sits on the dark card → keep it light. */
+  .report-scale-panel .report-metric-heading {
+    color: #ffffff;
+  }
 
-  /* Keep the back link out of the printed page / generated PDF. */
-  .report-nav {
-    display: none;
+  /* Don't split a chart card or a med block across pages. */
+  .report-scale-panel,
+  .report-metric,
+  .report-chart,
+  .report-med {
+    page-break-inside: avoid;
   }
 }
