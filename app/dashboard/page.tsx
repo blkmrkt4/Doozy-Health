@@ -93,9 +93,11 @@ type MedicationRow = {
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ day?: string }>;
+  searchParams: Promise<{ day?: string; tab?: string }>;
 }) {
-  const { day: selectedDayParam } = await searchParams;
+  const { day: selectedDayParam, tab } = await searchParams;
+  // Dashboard view: medications (default) vs supplies on hand.
+  const view: "medications" | "supplies" = tab === "supplies" ? "supplies" : "medications";
   const supabase = await createClient();
   const {
     data: { user },
@@ -602,30 +604,59 @@ export default async function DashboardPage({
           />
         ) : null}
 
-        <section className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <h1 className="text-sm font-medium text-muted">Medications</h1>
-            <ChartsToggle />
+        <section className="flex items-center justify-between gap-3">
+          {/* View tabs: the things you take vs the supplies you have on hand. */}
+          <div className="flex items-center gap-1 rounded-lg border border-line p-1">
+            <Link
+              href="/dashboard"
+              aria-current={view === "medications" ? "page" : undefined}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                view === "medications"
+                  ? "bg-surface text-paper"
+                  : "text-muted hover:text-paper"
+              }`}
+            >
+              Medications
+            </Link>
+            <Link
+              href="/dashboard?tab=supplies"
+              aria-current={view === "supplies" ? "page" : undefined}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                view === "supplies"
+                  ? "bg-surface text-paper"
+                  : "text-muted hover:text-paper"
+              }`}
+            >
+              Supplies{syringes.length > 0 ? ` (${syringes.length})` : ""}
+            </Link>
           </div>
-          {isOwner ? (
-            <div className="flex items-center gap-2">
+          {/* Actions are contextual to the active view. */}
+          <div className="flex items-center gap-2">
+            {view === "medications" ? (
+              <>
+                <ChartsToggle />
+                {isOwner ? (
+                  <Link
+                    href="/medications/new"
+                    className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent transition-opacity hover:opacity-90"
+                  >
+                    + Add Meds
+                  </Link>
+                ) : null}
+              </>
+            ) : isOwner ? (
               <Link
                 href="/inventory/new"
-                className="rounded-md border border-line px-3 py-2 text-sm text-muted transition-colors hover:bg-surface"
+                className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent transition-opacity hover:opacity-90"
               >
                 + Add Supplies
               </Link>
-              <Link
-                href="/medications/new"
-                className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent transition-opacity hover:opacity-90"
-              >
-                + Add Meds
-              </Link>
-            </div>
-          ) : null}
+            ) : null}
+          </div>
         </section>
 
-        {medications.length === 0 ? (
+        {view === "medications" ? (
+          medications.length === 0 ? (
           <section className="mt-8 rounded-md border border-dashed border-line px-6 py-16 text-center">
             <p className="text-sm text-muted">No medications yet.</p>
             {isOwner ? (
@@ -746,20 +777,31 @@ export default async function DashboardPage({
               );
             })}
           </ul>
-        )}
+          )
+        ) : null}
 
         {/* Quick-log a one-off / OTC medication (PRD §5.10.1 Phase B). */}
-        {canLog ? (
+        {view === "medications" && canLog ? (
           <div className="mt-3">
             <QuickLogOtc />
           </div>
         ) : null}
 
-        {/* Inventory — supplies on hand (syringes). A disclosure twisty per item
-            (PRD §5.1). Owners can remove. */}
-        {syringes.length > 0 ? (
-          <section className="mt-8">
-            <h2 className="mb-2 text-sm font-medium text-muted">Inventory</h2>
+        {/* Supplies on hand (syringes) — its own view. A disclosure twisty per
+            item (PRD §5.1). Owners can adjust the count or remove. */}
+        {view === "supplies" ? (
+          syringes.length === 0 ? (
+          <section className="mt-6 rounded-md border border-dashed border-line px-6 py-16 text-center">
+            <p className="text-sm text-muted">No supplies yet.</p>
+            {isOwner ? (
+              <p className="mt-1 text-xs text-faint">
+                Add syringes and other supplies to keep track of what you have on
+                hand.
+              </p>
+            ) : null}
+          </section>
+        ) : (
+          <section className="mt-6">
             <ul className="divide-y divide-line overflow-hidden rounded-md border border-line">
               {syringes.map((s) => (
                 <li key={s.id} className="px-4 py-3">
@@ -827,9 +869,10 @@ export default async function DashboardPage({
               ))}
             </ul>
           </section>
+          )
         ) : null}
 
-        {isOwner && archivedMeds.length > 0 ? (
+        {view === "medications" && isOwner && archivedMeds.length > 0 ? (
           <section className="mt-8">
             <details>
               <summary className="mb-2 cursor-pointer list-none text-sm font-medium text-muted">

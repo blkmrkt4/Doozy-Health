@@ -52,10 +52,10 @@ export function ScanForm() {
     }
   }
 
-  function addFiles(list: FileList | null) {
-    if (!list || list.length === 0) return;
+  function addFiles(picked: File[]) {
+    if (picked.length === 0) return;
     clearStaleError();
-    setFiles((prev) => [...prev, ...Array.from(list)].slice(0, MAX_PHOTOS));
+    setFiles((prev) => [...prev, ...picked].slice(0, MAX_PHOTOS));
   }
 
   function removeAt(i: number) {
@@ -108,8 +108,14 @@ export function ScanForm() {
             capture="environment"
             className="hidden"
             onChange={(e) => {
-              addFiles(e.target.files);
+              // Snapshot the File objects synchronously. e.target.files is a
+              // LIVE FileList; the value="" reset below empties it, so a
+              // deferred read (Array.from inside the setFiles updater) would see
+              // nothing — that's the "first pick does nothing" bug. The syringe
+              // scanner captures the file synchronously for the same reason.
+              const picked = e.target.files ? Array.from(e.target.files) : [];
               e.target.value = "";
+              addFiles(picked);
             }}
           />
           <input
@@ -119,8 +125,14 @@ export function ScanForm() {
             multiple
             className="hidden"
             onChange={(e) => {
-              addFiles(e.target.files);
+              // Snapshot the File objects synchronously. e.target.files is a
+              // LIVE FileList; the value="" reset below empties it, so a
+              // deferred read (Array.from inside the setFiles updater) would see
+              // nothing — that's the "first pick does nothing" bug. The syringe
+              // scanner captures the file synchronously for the same reason.
+              const picked = e.target.files ? Array.from(e.target.files) : [];
               e.target.value = "";
+              addFiles(picked);
             }}
           />
 
