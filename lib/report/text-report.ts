@@ -71,8 +71,10 @@ export function renderReportText(opts: {
   data: ReportData;
   narrative: ClinicalNarrative | null;
   showFullLog: boolean;
+  /** User-authored questions for the visit; rendered verbatim. */
+  visitNotes?: string | null;
 }): string {
-  const { patientName, generatedDate, data, narrative, showFullLog } = opts;
+  const { patientName, generatedDate, data, narrative, showFullLog, visitNotes } = opts;
   const { facts, rows } = data;
   const out: string[] = [];
 
@@ -84,6 +86,42 @@ export function renderReportText(opts: {
   out.push("");
   out.push(DISCLAIMER);
   out.push("");
+
+  // ── At a glance (PRD §5.10): the scannable essentials first ────────────────
+  out.push(RULE, "AT A GLANCE", RULE);
+  if (facts.medications.length === 0) {
+    out.push("No medications in this period.");
+  } else {
+    for (const m of facts.medications) {
+      out.push(`${m.name}: ${m.chosenRegimen ?? m.prescribedRegimen ?? "—"}`);
+    }
+  }
+  out.push("");
+  if ((facts.regimenChanges ?? []).length > 0) {
+    out.push("Changed during this period:");
+    for (const c of facts.regimenChanges) {
+      out.push(
+        `  ${c.date} — ${c.medication}: from ${c.from} to ${c.to}` +
+          (c.reason ? ` — note: "${c.reason}"` : "")
+      );
+    }
+    out.push("");
+  }
+  if ((facts.readings ?? []).length > 0) {
+    out.push("Readings entered by the user (a personal record, not lab results):");
+    for (const r of facts.readings) {
+      out.push(
+        `  ${r.date} — ${r.medication}: ${r.value} ${r.unit}` +
+          (r.note ? ` (${r.note})` : "")
+      );
+    }
+    out.push("");
+  }
+  if (visitNotes && visitNotes.trim()) {
+    out.push("Questions noted for this visit (in the patient's own words):");
+    out.push(`  ${visitNotes.trim().replace(/\n/g, "\n  ")}`);
+    out.push("");
+  }
 
   // ── Summary ────────────────────────────────────────────────────────────────
   out.push(RULE, "SUMMARY", RULE);

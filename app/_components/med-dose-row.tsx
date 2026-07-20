@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { quickLogDose, quickUnlogDose } from "@/app/medications/actions";
-import { doseToVolumeMl } from "@/lib/units";
+import { buildQuickLogFormData, defaultDoseText } from "@/lib/quick-log";
 import { COMPLIANCE_COLOURS } from "@/lib/colours";
 import type { MedLogMeta } from "@/lib/adherence";
 
@@ -13,14 +13,6 @@ import type { MedLogMeta } from "@/lib/adherence";
 // tap responds instantly on phone or desktop (PRD §5.4).
 
 const GREEN = COMPLIANCE_COLOURS.full;
-
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-function noonInput(ms: number): string {
-  const d = new Date(ms);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T12:00`;
-}
 
 function CheckDot({
   filled,
@@ -113,42 +105,19 @@ export function MedDoseRow({
     setOptimistic(logged);
   }, [logged]);
 
-  const canSyringe =
-    !!meta?.isInjectable &&
-    !!meta.concentrationAmount &&
-    meta.concentrationAmount > 0;
-  const mgPerMl = canSyringe
-    ? meta!.concentrationAmount! / (meta!.concentrationPerVolume || 1)
-    : 0;
-  const mlPrecision = (meta?.syringeCapacityMl ?? 1) <= 1 ? 2 : 1;
-
   // The editable dose: mL for injectables (converted to the regimen unit on
   // log), otherwise the dose amount in its own unit.
-  const initialDose = meta
-    ? canSyringe
-      ? doseToVolumeMl(meta.defaultAmount, meta.concentrationAmount!, meta.concentrationPerVolume || 1).toFixed(mlPrecision)
-      : String(meta.defaultAmount)
-    : "";
-  const [dose, setDose] = useState(initialDose);
-  const doseUnitLabel = canSyringe ? "ml" : meta?.defaultUnit ?? "";
+  const plan = meta ? defaultDoseText(meta) : { doseText: "", unitLabel: "" };
+  const [dose, setDose] = useState(plan.doseText);
+  const doseUnitLabel = plan.unitLabel;
 
   const total = Math.max(scheduled, optimistic, minDots);
   const complete = optimistic >= scheduled && scheduled > 0;
 
   function logOne() {
     if (!meta) return;
-    const n = Number(dose);
-    if (!Number.isFinite(n) || n <= 0) return;
-    const amount = canSyringe ? n * mgPerMl : n;
-    if (!Number.isFinite(amount) || amount <= 0) return;
-
-    const fd = new FormData();
-    fd.set("medication_id", meta.medId);
-    fd.set("amount", String(amount));
-    fd.set("unit", meta.defaultUnit);
-    fd.set("route_taken", meta.defaultRoute);
-    if (canSyringe) fd.set("note", `${dose} mL drawn`);
-    if (!isToday) fd.set("logged_at", noonInput(dayMs));
+    const fd = buildQuickLogFormData({ meta, doseText: dose, dayMs, isToday });
+    if (!fd) return;
 
     setAnimIndex(optimistic);
     setOptimistic((v) => v + 1);

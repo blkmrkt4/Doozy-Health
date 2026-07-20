@@ -81,6 +81,7 @@ describe("computeReportFacts", () => {
       diaryEntries: [],
       trackedFields: [],
       fieldScope: new Map(),
+      calibrations: [],
       ...partial,
     };
   }
@@ -242,5 +243,54 @@ describe("computeReportFacts", () => {
     expect(facts.adhocMeds).toHaveLength(1);
     expect(facts.adhocMeds[0].name).toBe("Tylenol");
     expect(facts.adhocMeds[0].doseCount).toBe(2);
+  });
+
+  it("emits in-range chosen-regimen changes as from→to facts", () => {
+    const r = rows({
+      medications: [
+        {
+          id: "med-t",
+          display_name: "estradiol",
+          canonical_drug_id: null,
+          colour: null,
+          prescribed_regimens: null,
+          delivery_forms: null,
+          chosen_regimens: [
+            // v1 predates the range; v2 lands inside it; both inactive-vs-active
+            // per the versioned write path.
+            {
+              dose_amount: "2",
+              dose_unit: "mg",
+              route: "oral",
+              frequency: { type: "every", interval: 1, unit: "day" },
+              active: false,
+              reason_note: null,
+              created_at: `2026-04-01T00:00:00`,
+            },
+            {
+              dose_amount: "4",
+              dose_unit: "mg",
+              route: "oral",
+              frequency: { type: "every", interval: 1, unit: "day" },
+              active: true,
+              reason_note: "after labs, per Dr. Chen",
+              created_at: `2026-05-12T09:00:00`,
+            },
+          ],
+        },
+      ],
+    });
+    const { facts } = computeReportFacts(r, from, to);
+    expect(facts.regimenChanges).toHaveLength(1);
+    const change = facts.regimenChanges[0];
+    expect(change.date).toBe("2026-05-12");
+    expect(change.medication).toBe("estradiol");
+    expect(change.from).toContain("2 mg");
+    expect(change.to).toContain("4 mg");
+    expect(change.reason).toBe("after labs, per Dr. Chen");
+
+    // A version pair entirely outside the range emits nothing.
+    const outside = computeReportFacts(r, "2026-06-01", "2026-06-30");
+    expect(outside.facts.regimenChanges).toHaveLength(0);
   });
 });

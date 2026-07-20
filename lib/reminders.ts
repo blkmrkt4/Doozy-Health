@@ -2,6 +2,8 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendPushNotification, type PushSubscription } from "@/lib/push";
 import { sendSms } from "@/lib/sms";
+import { escalationDedupeKey } from "@/lib/notifications";
+import { createNotification } from "@/lib/notifications-server";
 import type { Frequency } from "@/lib/types";
 
 // Reminders engine (PRD §5.5, §13.12). Schedule generation, delivery, and
@@ -233,24 +235,35 @@ export async function checkEscalations(): Promise<number> {
       .single();
     const medName = (med?.display_name as string) ?? "a medication";
 
-    // Notify the escalation caregiver via push (if subscribed).
-    const { data: sub } = await admin
+    // Notify the escalation caregiver on every device they registered — a
+    // caregiver's phone and tablet are both valid destinations.
+    const { data: subs } = await admin
       .from("push_subscriptions")
       .select("endpoint, p256dh, auth")
-      .eq("user_id", schedule.escalation_user_id)
-      .limit(1)
-      .maybeSingle();
-
-    if (sub) {
-      await sendPushNotification(
-        sub as unknown as PushSubscription,
-        {
-          title: "Dose not logged",
-          body: `${medName} was due and hasn't been logged yet.`,
-          url: `/medications/${schedule.medication_id}`,
-        }
-      );
+      .eq("user_id", schedule.escalation_user_id);
+    for (const sub of subs ?? []) {
+      await sendPushNotification(sub as unknown as PushSubscription, {
+        title: "Dose not logged",
+        body: `${medName} was due and hasn't been logged yet.`,
+        url: `/medications/${schedule.medication_id}`,
+      });
     }
+
+    // Leave a factual in-app record too, so the event survives a dismissed
+    // push. Structural dedupe: re-runs of the cron no-op on the same batch.
+    const earliestDue = overdue
+      .map((r) => r.due_at as string)
+      .sort()[0];
+    await createNotification(admin, {
+      patient_id: schedule.patient_id as string,
+      type: "dose_escalation",
+      severity: "info",
+      medication_id: schedule.medication_id as string,
+      inventory_item_id: null,
+      report_summary_id: null,
+      payload: { medName },
+      dedupe_key: escalationDedupeKey(schedule.id as string, earliestDue),
+    });
 
     // Mark these reminders as missed.
     const overdueIds = overdue.map((r) => r.id as string);

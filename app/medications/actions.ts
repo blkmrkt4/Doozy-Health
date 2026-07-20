@@ -426,19 +426,46 @@ export async function updateMedication(formData: FormData) {
   });
   if (delErr) failEdit(`Could not save the delivery form: ${delErr.message}`);
 
-  // 4) Chosen regimen — editable in place (PRD §5.3).
-  const { error: chosenErr } = await supabase
+  // 4) Chosen regimen — versioned (PRD §5.3). A change to what's actually
+  // taken records a NEW row via replace_chosen_regimen (atomic deactivate +
+  // insert; the one-active index forbids doing it in two client round-trips),
+  // preserving the dose-change history the medication page and snapshot
+  // render. A note-only edit updates in place — no noise version.
+  const { data: currentChosen } = await supabase
     .from("chosen_regimens")
-    .update({
-      dose_amount: chosen.dose_amount,
-      dose_unit: chosen.dose_unit,
-      frequency: chosen.frequency,
-      route: chosen.route,
-      reason_note: reasonNote || null,
-    })
+    .select("dose_amount, dose_unit, frequency, route")
     .eq("medication_id", medId)
-    .eq("active", true);
-  if (chosenErr) failEdit(`Could not save how you take it: ${chosenErr.message}`);
+    .eq("active", true)
+    .maybeSingle();
+  const regimenChanged =
+    !currentChosen ||
+    Number(currentChosen.dose_amount) !== Number(chosen.dose_amount) ||
+    currentChosen.dose_unit !== chosen.dose_unit ||
+    currentChosen.route !== chosen.route ||
+    JSON.stringify(currentChosen.frequency) !== JSON.stringify(chosen.frequency);
+
+  if (regimenChanged) {
+    const { error: chosenErr } = await supabase.rpc("replace_chosen_regimen", {
+      p_medication_id: medId,
+      p_dose_amount: chosen.dose_amount,
+      p_dose_unit: chosen.dose_unit,
+      p_frequency: chosen.frequency,
+      p_route: chosen.route,
+      p_reason_note: reasonNote || null,
+    });
+    if (chosenErr) {
+      failEdit(`Could not save how you take it: ${chosenErr.message}`);
+    }
+  } else {
+    const { error: chosenErr } = await supabase
+      .from("chosen_regimens")
+      .update({ reason_note: reasonNote || null })
+      .eq("medication_id", medId)
+      .eq("active", true);
+    if (chosenErr) {
+      failEdit(`Could not save how you take it: ${chosenErr.message}`);
+    }
+  }
 
   revalidatePath("/dashboard");
   revalidatePath(`/medications/${medId}`);
@@ -1669,6 +1696,68 @@ export async function enableSchedule(formData: FormData) {
 
   // Generate initial reminders (7-day lookahead).
   await generateReminders(scheduleId, 7);
+
+  revalidatePath(`/medications/${medicationId}`);
+  redirect(`/medications/${medicationId}`);
+}
+
+/**
+ * Set (or clear) a schedule's caregiver escalation: when a reminded dose
+ * stays unlogged for the chosen delay, the named caregiver-role member is
+ * notified (PRD §5.5). Owner-only via the dose_schedules_owner_update RLS
+ * policy; the contact must be an accepted caregiver on the same patient.
+ */
+export async function setScheduleEscalation(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const medicationId = str(formData, "medication_id");
+  const scheduleId = str(formData, "schedule_id");
+  if (!medicationId || !scheduleId) redirect("/dashboard");
+
+  const delayRaw = str(formData, "escalation_delay_min");
+  const contactRaw = str(formData, "escalation_user_id");
+  const clearing = !delayRaw || !contactRaw;
+
+  let delay: number | null = null;
+  let contact: string | null = null;
+  if (!clearing) {
+    delay = Number(delayRaw);
+    if (![30, 60, 120].includes(delay)) {
+      failDose(medicationId, "Choose a valid escalation delay.");
+    }
+    // The contact must be an accepted caregiver-role member of this
+    // medication's patient — never an arbitrary user id from the form.
+    const { data: med } = await supabase
+      .from("medications")
+      .select("patient_id")
+      .eq("id", medicationId)
+      .single();
+    if (!med) failDose(medicationId, "Medication not found.");
+    const { data: member } = await supabase
+      .from("patient_memberships")
+      .select("user_id")
+      .eq("patient_id", med.patient_id)
+      .eq("user_id", contactRaw)
+      .eq("role", "caregiver")
+      .not("accepted_at", "is", null)
+      .maybeSingle();
+    if (!member) {
+      failDose(medicationId, "Choose an accepted caregiver to notify.");
+    }
+    contact = contactRaw;
+  }
+
+  const { error } = await supabase
+    .from("dose_schedules")
+    .update({ escalation_delay_min: delay, escalation_user_id: contact })
+    .eq("id", scheduleId);
+  if (error) {
+    failDose(medicationId, `Could not save the setting: ${error.message}`);
+  }
 
   revalidatePath(`/medications/${medicationId}`);
   redirect(`/medications/${medicationId}`);

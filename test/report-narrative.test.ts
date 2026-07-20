@@ -94,6 +94,8 @@ const facts: ReportFacts = {
     },
   ],
   adhocMeds: [],
+  regimenChanges: [],
+  readings: [],
   diaryMetrics: [
     {
       name: "Energy",

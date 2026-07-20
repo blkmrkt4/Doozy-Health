@@ -1,9 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { readSecret } from "@/lib/secrets";
 
 // Web Push subscription endpoint (PRD §5.5). Registers a push subscription
 // for the authenticated user. The service worker sends the subscription
 // object here after obtaining permission.
+
+/**
+ * The VAPID public key, for the browser's pushManager.subscribe call. The
+ * public half is not a secret, but require auth anyway — only signed-in users
+ * have any business subscribing.
+ */
+export async function GET() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  }
+
+  try {
+    const key = await readSecret("vapid_public_key");
+    return NextResponse.json({ key });
+  } catch {
+    return NextResponse.json(
+      { error: "Push is not configured on this deployment." },
+      { status: 503 }
+    );
+  }
+}
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient();

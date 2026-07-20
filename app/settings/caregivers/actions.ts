@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getActivePatient, setActivePatient } from "@/lib/active-patient";
@@ -47,10 +48,38 @@ export async function inviteCaregiver(formData: FormData) {
     .eq("email", email)
     .maybeSingle();
 
-  if (!inviteeProfile) {
-    fail(
-      `No account found for ${email}. They need to sign up first, then you can invite them.`
-    );
+  // No account yet: pre-provision one and send Supabase's invite email. The
+  // handle_new_user trigger creates their profile (and own default patient),
+  // so the membership insert below works the same as for an existing user and
+  // the invite shows on their dashboard after they first sign in (PRD §4.5).
+  // The email is Supabase's neutral invite — it carries no health values
+  // (hard rule #12).
+  let inviteeId = inviteeProfile?.id as string | undefined;
+  if (!inviteeId) {
+    const hdrs = await headers();
+    const host =
+      hdrs.get("x-forwarded-host") ?? hdrs.get("host") ?? "localhost:3000";
+    const proto = hdrs.get("x-forwarded-proto") ?? "http";
+    const { data: invited, error: inviteError } =
+      await admin.auth.admin.inviteUserByEmail(email, {
+        redirectTo: `${proto}://${host}/auth/callback?next=/dashboard`,
+      });
+    if (inviteError || !invited?.user) {
+      fail(
+        `Could not send an invitation to ${email}: ${
+          inviteError?.message ?? "unknown error"
+        }`
+      );
+    }
+    // The signup trigger runs on the auth insert; confirm the profile row is
+    // there before pointing a membership at it.
+    const { data: created } = await admin
+      .from("users")
+      .select("id")
+      .eq("id", invited.user.id)
+      .maybeSingle();
+    if (!created) fail(`Could not create an account for ${email}. Try again.`);
+    inviteeId = created.id as string;
   }
 
   // Check for existing membership.
@@ -58,7 +87,7 @@ export async function inviteCaregiver(formData: FormData) {
     .from("patient_memberships")
     .select("id")
     .eq("patient_id", active.id)
-    .eq("user_id", inviteeProfile.id)
+    .eq("user_id", inviteeId)
     .maybeSingle();
 
   if (existing) fail(`${email} is already a member.`);
@@ -66,7 +95,7 @@ export async function inviteCaregiver(formData: FormData) {
   // Create the membership (RLS: owner can insert).
   const { error } = await supabase.from("patient_memberships").insert({
     patient_id: active.id,
-    user_id: inviteeProfile.id,
+    user_id: inviteeId,
     role,
     invited_by: user.id,
     // accepted_at left null — the invitee must accept.

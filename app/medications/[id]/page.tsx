@@ -51,8 +51,10 @@ import {
   disableSchedule,
   runVerification,
   setMedicationPrivacy,
+  setScheduleEscalation,
   updateSupply,
 } from "@/app/medications/actions";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { RemoveMedicationControls } from "./_components/remove-medication";
 import {
   DOCUMENTS_BUCKET,
@@ -64,6 +66,7 @@ import { LogDoseForm } from "./log-dose-form";
 import { SyringeVisual } from "@/app/medications/_components/syringe-visual";
 import { buildSetupChecklist } from "@/lib/medication-setup";
 import { SetupChecklist } from "@/app/medications/[id]/_components/setup-checklist";
+import { RegimenHistory } from "@/app/medications/[id]/_components/regimen-history";
 
 type Regimen = {
   dose_amount: string;
@@ -381,14 +384,39 @@ export default async function MedicationDetailPage({
   // Dose schedule (PRD §5.5). Shows whether reminders are enabled.
   const { data: scheduleData } = await supabase
     .from("dose_schedules")
-    .select("id, next_due_at, escalation_delay_min")
+    .select("id, next_due_at, escalation_delay_min, escalation_user_id")
     .eq("medication_id", med.id)
     .maybeSingle();
   const schedule = scheduleData as {
     id: string;
     next_due_at: string;
     escalation_delay_min: number | null;
+    escalation_user_id: string | null;
   } | null;
+
+  // Accepted caregiver-role members — the candidates for the escalation
+  // contact. Owner-only UI; emails via the admin client (same pattern as the
+  // caregivers settings page — users RLS is self-only).
+  let escalationCandidates: { id: string; email: string }[] = [];
+  if (isOwner && schedule) {
+    const adminClient = createAdminClient();
+    const { data: caregiverRows } = await adminClient
+      .from("patient_memberships")
+      .select("user_id")
+      .eq("patient_id", med.patient_id)
+      .eq("role", "caregiver")
+      .not("accepted_at", "is", null);
+    const ids = (caregiverRows ?? []).map((r) => r.user_id as string);
+    if (ids.length > 0) {
+      const { data: profiles } = await adminClient
+        .from("users")
+        .select("id, email")
+        .in("id", ids);
+      escalationCandidates = ((profiles ?? []) as { id: string; email: string }[])
+        .map((p) => ({ id: p.id, email: p.email }))
+        .sort((a, b) => a.email.localeCompare(b.email));
+    }
+  }
 
   // Drug interactions (PRD §5.8, §13.14). Pairwise check against other
   // active medications' canonical drug IDs.
@@ -855,6 +883,62 @@ export default async function MedicationDetailPage({
                     Disable reminders
                   </button>
                 </form>
+
+                {/* Caregiver escalation (PRD §5.5): notify a named caregiver
+                    when a reminded dose stays unlogged. Neutral copy — a
+                    notification about the record, never an instruction. */}
+                {escalationCandidates.length > 0 ? (
+                  <form
+                    action={setScheduleEscalation}
+                    className="space-y-2 border-t border-line pt-3"
+                  >
+                    <input type="hidden" name="medication_id" value={med.id} />
+                    <input type="hidden" name="schedule_id" value={schedule.id} />
+                    <p className="text-sm text-muted">
+                      If a dose isn&rsquo;t logged after a reminder, also
+                      notify:
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        name="escalation_user_id"
+                        defaultValue={schedule.escalation_user_id ?? ""}
+                        className="rounded-md border border-line bg-surface px-2 py-1.5 text-sm text-paper outline-none focus:border-accent"
+                      >
+                        <option value="">No one</option>
+                        {escalationCandidates.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.email}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="text-sm text-faint">after</span>
+                      <select
+                        name="escalation_delay_min"
+                        defaultValue={String(schedule.escalation_delay_min ?? 60)}
+                        className="rounded-md border border-line bg-surface px-2 py-1.5 text-sm text-paper outline-none focus:border-accent"
+                      >
+                        <option value="30">30 minutes</option>
+                        <option value="60">1 hour</option>
+                        <option value="120">2 hours</option>
+                      </select>
+                      <button
+                        type="submit"
+                        className="rounded-md border border-line px-3 py-1.5 text-sm text-muted hover:bg-surface"
+                      >
+                        Save
+                      </button>
+                    </div>
+                    {schedule.escalation_user_id ? (
+                      <p className="text-xs text-faint">
+                        Currently notifying a caregiver{" "}
+                        {schedule.escalation_delay_min
+                          ? `${schedule.escalation_delay_min} minutes`
+                          : "a while"}{" "}
+                        after an unlogged reminder.
+                      </p>
+                    ) : null}
+                  </form>
+                ) : null}
               </>
             ) : (
               <>
@@ -874,6 +958,13 @@ export default async function MedicationDetailPage({
             )}
           </section>
         ) : null}
+
+        {/* Dose history (PRD §5.3): versioned chosen-regimen changes and new
+            prescriptions on record, newest first. */}
+        <RegimenHistory
+          chosen={med.chosen_regimens ?? []}
+          prescribed={med.prescribed_regimens ?? []}
+        />
 
         {/* Setup checklist (PRD §5.1–5.3) — a collapsed twisty here; the live
             checklist for adding lives on the Add screen. Editable in place. */}

@@ -103,6 +103,13 @@ body {
   }
 }
 
+/* Simple view (users.display_prefs.simple_mode; data-simple server-rendered
+   on <html>). Every rem-based Tailwind size scales with the root font-size,
+   so the whole app gets larger type without forking components. */
+:root[data-simple] {
+  font-size: 115%;
+}
+
 /* Privacy-mode blur (PRD §9). Applied to elements with .blur-private when
    the body has .privacy-mode. Blurs medication names, dose amounts, and
    diary values for over-shoulder situations. */

@@ -24,7 +24,8 @@ export type NotificationType =
   | "supply_low_medication"
   | "supply_low_item"
   | "interaction"
-  | "dose_above_prescribed";
+  | "dose_above_prescribed"
+  | "dose_escalation";
 
 export type NotificationSeverity = "info" | "caution" | "serious";
 
@@ -75,6 +76,11 @@ export function interactionDedupeKey(drugAId: string, drugBId: string): string {
 
 /** Keyed by the date of the latest over-amount example, so regenerating the
  *  same snapshot (or an overlapping window) is a no-op. */
+/** One escalation record per schedule + due time — re-runs of the cron no-op. */
+export function escalationDedupeKey(scheduleId: string, dueAtISO: string): string {
+  return `escalation:${scheduleId}:${dueAtISO}`;
+}
+
 export function overPrescribedDedupeKey(medicationId: string, latestDate: string): string {
   return `over_prescribed:med:${medicationId}:${latestDate}`;
 }
@@ -195,6 +201,16 @@ export function renderNotification(
         body:
           `${when}a logged dose of ${medName} was ${logged}; the amount on ` +
           `record is ${onRecord} — discuss with your doctor or pharmacist.`,
+      };
+    }
+
+    case "dose_escalation": {
+      // Staleness-neutral record of the escalation event — states what was
+      // logged (nothing yet), never an instruction to dose (PRD §6.1, rule #14).
+      const medName = s("medName", "a medication");
+      return {
+        title: `Dose not logged — ${medName}`,
+        body: `A scheduled dose of ${medName} was due and hasn't been logged yet.`,
       };
     }
   }

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { generateClinicalSummary } from "./actions";
+import { generateClinicalSummary, saveVisitNotes } from "./actions";
 
 // Report export config (PRD §5.10, §5.10.1). The report is viewed in the
 // browser — as the styled HTML report or a plain-text version — not downloaded
@@ -36,18 +36,22 @@ export function ReportForm({
   initialFrom,
   initialTo,
   initialHasSummary,
+  initialVisitNotes = "",
 }: {
   patientId: string;
   patientName: string;
   initialFrom: string;
   initialTo: string;
   initialHasSummary: boolean;
+  initialVisitNotes?: string;
 }) {
   const router = useRouter();
 
   const [from, setFrom] = useState(initialFrom);
   const [to, setTo] = useState(initialTo);
   const [includeFullLog, setIncludeFullLog] = useState(false);
+  const [visitNotes, setVisitNotes] = useState(initialVisitNotes);
+  const [notesState, setNotesState] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   // Whether a written summary is known to exist for the *current* range. True on
   // load if one was cached for the default range; cleared whenever the dates
@@ -188,6 +192,42 @@ export function ReportForm({
             </div>
             {summaryError ? (
               <p className="text-xs text-yellow-300">{summaryError}</p>
+            ) : null}
+          </div>
+
+          {/* ── Questions for the visit (user-authored, verbatim) ────────── */}
+          <div className="space-y-1.5">
+            <label htmlFor="visit-notes" className="block text-sm text-paper">
+              Questions for this visit
+            </label>
+            <p className="text-xs text-faint">
+              Anything you want to remember to raise — printed word-for-word on
+              the report&rsquo;s first page.
+            </p>
+            <textarea
+              id="visit-notes"
+              rows={3}
+              value={visitNotes}
+              onChange={(e) => {
+                setVisitNotes(e.target.value);
+                setNotesState("idle");
+              }}
+              onBlur={async () => {
+                if (visitNotes === initialVisitNotes && notesState === "idle") return;
+                setNotesState("saving");
+                const res = await saveVisitNotes(patientId, from, to, visitNotes);
+                setNotesState(res.ok ? "saved" : "error");
+              }}
+              placeholder="e.g. Ask about the evening dose timing…"
+              className={inputCls}
+            />
+            {notesState === "saved" ? (
+              <p className="text-xs text-faint">Saved.</p>
+            ) : notesState === "error" ? (
+              <p className="text-xs text-yellow-300">
+                Could not save the note. It saves when you tap outside the box —
+                try again.
+              </p>
             ) : null}
           </div>
 

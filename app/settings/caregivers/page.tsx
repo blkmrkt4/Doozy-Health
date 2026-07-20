@@ -158,6 +158,11 @@ export default async function CaregiversPage({
         {/* Invite form */}
         <section className="rounded-md border border-line p-4 space-y-3">
           <h2 className="text-sm font-medium text-paper">Invite</h2>
+          <p className="text-xs text-faint">
+            If they don&rsquo;t have a WellKept account yet, we&rsquo;ll email
+            them an invitation to create one; the invite appears on their
+            dashboard to accept or decline.
+          </p>
           <form action={inviteCaregiver} className="space-y-3">
             <div>
               <label htmlFor="email" className="block text-sm text-muted">

@@ -129,6 +129,14 @@ const PRIMARY: {
   { key: "settings", label: "Settings", href: "/settings" },
 ];
 
+// Simple view (users.display_prefs.simple_mode): three destinations only —
+// record today's doses, print a summary for the doctor, switch back.
+const PRIMARY_SIMPLE: typeof PRIMARY = [
+  { key: "dashboard", label: "Today", href: "/dashboard" },
+  { key: "snapshot", label: "Doctor summary", short: "Summary", href: "/report" },
+  { key: "settings", label: "Settings", href: "/settings" },
+];
+
 function activeKey(pathname: string): Key | null {
   if (pathname === "/dashboard") return "dashboard";
   if (pathname.startsWith("/diary")) return "diary";
@@ -158,11 +166,14 @@ export function AppNav({
   userEmail,
   isOwner,
   unreadCount = 0,
+  simpleMode = false,
 }: {
   userEmail: string | null;
   isOwner: boolean;
   /** Unread notifications for the active patient — drives the bell dot. */
   unreadCount?: number;
+  /** Simple view: 3-item nav, larger labels, pared-down sidebar. */
+  simpleMode?: boolean;
 }) {
   const pathname = usePathname() ?? "";
   const [open, setOpen] = useState(false);
@@ -204,6 +215,7 @@ export function AppNav({
   if (!shown) return null;
 
   const current = activeKey(pathname);
+  const items = simpleMode ? PRIMARY_SIMPLE : PRIMARY;
 
   // Unread marker on the bell — a quiet dot, no count, no animation (PRD §9).
   const dot = (
@@ -260,7 +272,7 @@ export function AppNav({
               expands its label on hover; the active (current) item flips to a
               filled pill (icon + label) while the others collapse to icons. */}
           <nav className="hidden items-center gap-1 rounded-2xl border border-line p-1 lg:ml-3 lg:flex">
-            {PRIMARY.map((item, i) => {
+            {items.map((item, i) => {
               const isActive = current === item.key;
               // Active = inverted fill. Inactive = transparent, fills on hover.
               const container = isActive
@@ -277,7 +289,9 @@ export function AppNav({
                 : "ml-0 max-w-0 opacity-0 group-hover:ml-2 group-hover:max-w-[9rem] group-hover:opacity-100";
               return (
                 <Fragment key={item.key}>
-                  {i === 1 ? <span className="mx-1 h-6 w-px bg-line" /> : null}
+                  {i === 1 && !simpleMode ? (
+                    <span className="mx-1 h-6 w-px bg-line" />
+                  ) : null}
                   <Link
                     href={item.href}
                     aria-label={navLabel(item)}
@@ -313,7 +327,7 @@ export function AppNav({
         aria-label="Primary"
       >
         <div className="mx-auto flex max-w-md items-stretch px-1">
-          {PRIMARY.map((item) => {
+          {items.map((item) => {
             const isActive = current === item.key;
             const tone = item.accent
               ? "text-accent"
@@ -326,13 +340,15 @@ export function AppNav({
                 href={item.href}
                 aria-label={navLabel(item)}
                 aria-current={isActive ? "page" : undefined}
-                className={`flex min-h-[44px] min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-0.5 py-1.5 transition-colors ${tone}`}
+                className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-0.5 py-1.5 transition-colors ${simpleMode ? "min-h-[56px]" : "min-h-[44px]"} ${tone}`}
               >
                 <span className="relative flex items-center justify-center">
                   {icons[item.key]}
                   {item.key === "notifications" && unreadCount > 0 ? dot : null}
                 </span>
-                <span className="max-w-full truncate text-[10px] leading-none">
+                <span
+                  className={`max-w-full truncate leading-none ${simpleMode ? "text-xs" : "text-[10px]"}`}
+                >
                   {item.short ?? item.label}
                 </span>
               </Link>
@@ -390,13 +406,13 @@ export function AppNav({
           </Link>
 
           <div className="mt-2 flex-1 space-y-1 overflow-y-auto px-3">
-            {isOwner ? (
+            {isOwner && !simpleMode ? (
               <SidebarLink href="/inventory/new" icon={icons.box} label="Add Supplies" onClick={() => setOpen(false)} />
             ) : null}
-            {isOwner ? (
+            {isOwner && !simpleMode ? (
               <SidebarLink href="/settings/caregivers" icon={icons.users} label="Caregivers" onClick={() => setOpen(false)} />
             ) : null}
-            {isOwner ? (
+            {isOwner && !simpleMode ? (
               <SidebarLink href="/settings/tracking" icon={icons.sliders} label="Diary tracking fields" onClick={() => setOpen(false)} />
             ) : null}
 
@@ -417,7 +433,9 @@ export function AppNav({
               </span>
             </button>
 
-            <SidebarLink href="/welcome" icon={icons.home} label="Landing page" onClick={() => setOpen(false)} />
+            {!simpleMode ? (
+              <SidebarLink href="/welcome" icon={icons.home} label="Landing page" onClick={() => setOpen(false)} />
+            ) : null}
           </div>
 
           <form action={signOut} className="border-t border-line p-3">

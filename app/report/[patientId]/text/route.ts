@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { buildReportData } from "@/lib/report/report-data";
 import { renderReportText } from "@/lib/report/text-report";
-import { type ClinicalNarrative } from "@/lib/report/narrative";
+import { buildFallbackNarrative, validateNarrative } from "@/lib/report/narrative";
 
 // Plain-text view of the doctor report (PRD §5.10). Returns text/plain so the
 // browser renders it as a readable, copy-pasteable document. Reads the cached
@@ -45,19 +45,26 @@ export async function GET(
     buildReportData(supabase, patientId, from, to),
     supabase
       .from("report_summaries")
-      .select("summary")
+      .select("summary, visit_notes")
       .eq("patient_id", patientId)
       .eq("from_date", from)
       .eq("to_date", to)
       .maybeSingle(),
   ]);
 
+  // Cached LLM narrative when valid (a visit-notes placeholder row has an
+  // empty summary), else the deterministic fallback — never an LLM call here.
+  const narrative =
+    validateNarrative((cached?.summary as Record<string, unknown>) ?? {}) ??
+    buildFallbackNarrative(data.facts);
+
   const text = renderReportText({
     patientName: patient.name as string,
     generatedDate: new Date().toISOString().slice(0, 10),
     data,
-    narrative: (cached?.summary as ClinicalNarrative | undefined) ?? null,
+    narrative,
     showFullLog,
+    visitNotes: (cached?.visit_notes as string | null) ?? null,
   });
 
   return new NextResponse(text, {

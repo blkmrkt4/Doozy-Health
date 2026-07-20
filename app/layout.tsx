@@ -5,6 +5,7 @@ import { AppNav } from "./_components/app-nav";
 import { createClient } from "@/lib/supabase/server";
 import { getActivePatient } from "@/lib/active-patient";
 import { getUnreadNotificationCount } from "@/lib/notifications-server";
+import { getDisplayPrefs } from "@/lib/display-prefs";
 
 export const metadata: Metadata = {
   title: "WellKept",
@@ -54,16 +55,24 @@ export default async function RootLayout({
   } = await supabase.auth.getUser();
   let isOwner = false;
   let unreadCount = 0;
+  let simpleMode = false;
   if (user) {
     const active = await getActivePatient(supabase);
     isOwner = active?.role === "owner";
     if (active) {
       unreadCount = await getUnreadNotificationCount(supabase, active.id);
     }
+    ({ simpleMode } = await getDisplayPrefs(supabase, user.id));
   }
 
   return (
-    <html lang="en-GB" suppressHydrationWarning>
+    // data-simple is server-rendered (unlike the localStorage theme) so the
+    // larger simple-mode type never flashes in at hydration.
+    <html
+      lang="en-GB"
+      suppressHydrationWarning
+      {...(simpleMode ? { "data-simple": "" } : {})}
+    >
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
       </head>
@@ -73,6 +82,7 @@ export default async function RootLayout({
           userEmail={user?.email ?? null}
           isOwner={isOwner}
           unreadCount={unreadCount}
+          simpleMode={simpleMode}
         />
         {/* The disclaimer footer is global so it cannot be omitted from any
             screen — PRD §6.1 requires it everywhere. */}

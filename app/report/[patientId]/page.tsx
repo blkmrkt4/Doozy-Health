@@ -7,7 +7,11 @@ import {
   type DiarySeries,
 } from "@/lib/report/report-data";
 import { buildReportPkCharts } from "@/lib/report/pk-chart-data";
-import { type ClinicalNarrative } from "@/lib/report/narrative";
+import {
+  buildFallbackNarrative,
+  validateNarrative,
+  type ClinicalNarrative,
+} from "@/lib/report/narrative";
 import { AmountInSystemChart } from "@/app/_components/amount-in-system-chart";
 import { Sparkline, BooleanStrip, DistributionBars } from "@/app/diary/_components/field-charts";
 import { ScaleChart, type ScaleSeries } from "@/app/diary/_components/scale-chart";
@@ -134,7 +138,7 @@ export default async function ReportPage({
   const [{ data: cached }, pkCharts] = await Promise.all([
     supabase
       .from("report_summaries")
-      .select("summary")
+      .select("summary, visit_notes")
       .eq("patient_id", patientId)
       .eq("from_date", startDate)
       .eq("to_date", endDate)
@@ -142,10 +146,30 @@ export default async function ReportPage({
     buildReportPkCharts(supabase, data.rows.medications, data.rows.doseLogs, startDate, endDate),
   ]);
 
-  const narrative = (cached?.summary as ClinicalNarrative | undefined) ?? null;
+  // The cached LLM narrative when one exists (a visit-notes placeholder row
+  // has an empty summary and fails validation); otherwise the deterministic
+  // fallback, so the report always opens with a factual overview (§5.10.1).
+  const narrative: ClinicalNarrative =
+    validateNarrative((cached?.summary as Record<string, unknown>) ?? {}) ??
+    buildFallbackNarrative(data.facts);
+  const visitNotes = (cached?.visit_notes as string | null) ?? null;
   const narrativeByMed = new Map(
     (narrative?.medications ?? []).map((m) => [m.name, m.summary])
   );
+
+  // Essentials-page data: the current regimen per (non-OTC) medication.
+  const essentialsMeds = data.rows.medications
+    .filter((m) => !m.single_use)
+    .map((m) => {
+      const chosen = (m.chosen_regimens ?? []).find((c) => c.active);
+      return {
+        id: m.id,
+        name: m.display_name,
+        dose: chosen ? formatDose(chosen.dose_amount, chosen.dose_unit) : "—",
+        frequency: chosen ? formatFrequency(chosen.frequency) : "—",
+        route: chosen ? formatRoute(chosen.route) : "—",
+      };
+    });
 
   const generatedDate = new Date().toLocaleDateString("en-GB", {
     day: "2-digit",
@@ -202,11 +226,106 @@ export default async function ReportPage({
         <p className="report-disclaimer">{DISCLAIMER}</p>
       </section>
 
+      {/* ── Essentials — the scannable first page (PRD §5.10) ──── */}
+      <section className="report-section">
+        <h2 className="report-heading">At a glance</h2>
+
+        {essentialsMeds.length > 0 ? (
+          <table className="report-table">
+            <thead>
+              <tr>
+                <th>Medication</th>
+                <th>Taking</th>
+                <th>Frequency</th>
+                <th>Route</th>
+              </tr>
+            </thead>
+            <tbody>
+              {essentialsMeds.map((m) => (
+                <tr key={m.id}>
+                  <td>{m.name}</td>
+                  <td>{m.dose}</td>
+                  <td>{m.frequency}</td>
+                  <td>{m.route}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p className="report-empty">No medications in this period.</p>
+        )}
+
+        {data.facts.regimenChanges.length > 0 ? (
+          <>
+            <h3 className="report-metric-heading">Changed during this period</h3>
+            <ul className="report-summary">
+              {data.facts.regimenChanges.map((c, i) => (
+                <li key={i}>
+                  {c.date} — {c.medication}: from {c.from} to {c.to}
+                  {c.reason ? ` — note: “${c.reason}”` : ""}
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : null}
+
+        {data.facts.readings.length > 0 ? (
+          <>
+            <h3 className="report-metric-heading">Readings you entered</h3>
+            <table className="report-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Medication</th>
+                  <th>Reading</th>
+                  <th>Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.facts.readings.map((r, i) => (
+                  <tr key={i}>
+                    <td>{r.date}</td>
+                    <td>{r.medication}</td>
+                    <td>
+                      {r.value} {r.unit}
+                    </td>
+                    <td>{r.note ?? ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="report-summary-stamp">
+              Values entered by the user — a personal record, not lab results.
+            </p>
+          </>
+        ) : null}
+
+        {visitNotes ? (
+          <>
+            <h3 className="report-metric-heading">
+              Questions noted for this visit
+            </h3>
+            <p className="report-summary-caveat">
+              In the patient&rsquo;s own words:
+            </p>
+            <p className="report-summary">{visitNotes}</p>
+          </>
+        ) : null}
+
+        <p className="report-disclaimer">{DISCLAIMER}</p>
+      </section>
+
       {/* ── Clinical summary ───────────────────────────────────── */}
       <section className="report-section">
         <h2 className="report-heading">Summary</h2>
         {narrative ? (
           <div className="report-summary">
+            {!narrative.generatedByLlm ? (
+              <p className="report-summary-caveat">
+                Automatic factual summary of what was logged. A fuller written
+                summary can be generated from the Snapshot screen.
+              </p>
+            ) : null}
             {narrative.overview ? <p>{narrative.overview}</p> : null}
             {narrative.adherence_notes ? (
               <p>

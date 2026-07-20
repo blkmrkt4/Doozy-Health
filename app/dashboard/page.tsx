@@ -10,6 +10,9 @@ import { acceptInvite, declineInvite } from "@/app/settings/caregivers/actions";
 import { formatRegimenSummary, relativeAge } from "@/lib/format";
 import { PatientSwitcher } from "@/app/_components/patient-switcher";
 import { CalendarSection } from "@/app/_components/calendar-section";
+import { SimpleToday } from "@/app/dashboard/simple-today";
+import { getDisplayPrefs } from "@/lib/display-prefs";
+import { buildSimpleTodayModel } from "@/lib/simple-today";
 import { MedTimeline } from "@/app/_components/med-timeline";
 import { ChartsToggle } from "@/app/_components/charts-toggle";
 import { QuickLogOtc } from "@/app/_components/quick-log-otc";
@@ -109,6 +112,8 @@ export default async function DashboardPage({
     .select("email, is_system_admin")
     .eq("id", user.id)
     .maybeSingle();
+
+  const { simpleMode } = await getDisplayPrefs(supabase, user.id);
 
   const activePatient = await getActivePatient(supabase);
 
@@ -341,6 +346,30 @@ export default async function DashboardPage({
     amount: r.amount != null ? Number(r.amount) : null,
     unit: (r.unit as string | null) ?? null,
   }));
+
+  // Simple mode (users.display_prefs.simple_mode): render the pared-down Today
+  // view from the models already built and skip the heavy per-card wheel / PK /
+  // supplies assembly below entirely — none of it is shown there.
+  if (simpleMode) {
+    return (
+      <SimpleToday
+        activePatient={activePatient}
+        allPatients={allPatients}
+        pendingInvites={pendingInvites.map((inv) => ({
+          ...inv,
+          membershipId: pendingMembershipIds.get(inv.patientId) ?? null,
+        }))}
+        canLog={canLog}
+        model={buildSimpleTodayModel({
+          wheelModel,
+          medMeta,
+          dayLogs: calendarDayLogs,
+        })}
+        medMeta={medMeta}
+        medsWithInteractions={Array.from(medsWithInteractions)}
+      />
+    );
+  }
 
   // A per-drug wheel model for the calendar bar on each medication card.
   const wheelByMed = new Map<string, ReturnType<typeof buildWheelModel>>();

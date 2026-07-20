@@ -94,6 +94,14 @@ export type TrackedFieldRow = {
   cadence: string | null;
 };
 
+export type CalibrationRow = {
+  medication_id: string;
+  value: string;
+  unit: string;
+  observed_at: string;
+  note: string | null;
+};
+
 export type ReportRows = {
   patient: PatientRow;
   medications: MedicationRow[];
@@ -102,6 +110,8 @@ export type ReportRows = {
   trackedFields: TrackedFieldRow[];
   /** tracked_field_id → medication_ids it is scoped to (empty ⇒ general). */
   fieldScope: Map<string, string[]>;
+  /** User-entered blood readings (pk_calibrations) in range, oldest first. */
+  calibrations: CalibrationRow[];
 };
 
 // ── Facts (the compact, number-bearing object handed to the LLM) ─────────────
@@ -195,12 +205,37 @@ export type AdhocMedFacts = {
   dates: string[];
 };
 
+/** A chosen-regimen change recorded in the period (PRD §5.3): what the user
+ *  actually takes moved from one dose/cadence to another, with their own
+ *  reason note. Factual — never rendered as a judgment of the change. */
+export type RegimenChangeFact = {
+  date: string;
+  medication: string;
+  from: string;
+  to: string;
+  reason: string | null;
+};
+
+/** A reading the user entered (pk_calibrations) — always attributed as
+ *  "readings you entered", never presented as lab results (PRD §6.1). */
+export type ReadingFact = {
+  date: string;
+  medication: string;
+  value: number;
+  unit: string;
+  note: string | null;
+};
+
 export type ReportFacts = {
   period: { from: string; to: string; days: number };
   patient: { ageYears?: number; sex?: string };
   medications: MedicationFacts[];
   /** one-off / OTC medications taken in the period (not regimen meds). */
   adhocMeds: AdhocMedFacts[];
+  /** chosen-regimen changes recorded in the period, oldest first. */
+  regimenChanges: RegimenChangeFact[];
+  /** user-entered readings in the period, oldest first. */
+  readings: ReadingFact[];
   diaryMetrics: DiaryMetricFacts[];
   timeline: TimelineWeek[];
   /** Curated drug/substance interactions among the in-scope drug set (rule #9 —
@@ -550,6 +585,45 @@ export function computeReportFacts(
     };
   });
 
+  // ── Dose changes in the period (PRD §5.3) ──────────────────────────────────
+  // Consecutive chosen-regimen versions where the newer one landed in range.
+  const regimenChanges: RegimenChangeFact[] = [];
+  for (const m of regularMeds) {
+    const versions = [...(m.chosen_regimens ?? [])].sort((a, b) =>
+      a.created_at.localeCompare(b.created_at)
+    );
+    for (let i = 1; i < versions.length; i++) {
+      const ts = new Date(versions[i].created_at).getTime();
+      if (!Number.isFinite(ts) || ts < fromMs || ts > toMs) continue;
+      regimenChanges.push({
+        date: dayKey(ts),
+        medication: m.display_name,
+        from: formatRegimenSummary(versions[i - 1]),
+        to: formatRegimenSummary(versions[i]),
+        reason: versions[i].reason_note ?? null,
+      });
+    }
+  }
+  regimenChanges.sort((a, b) => a.date.localeCompare(b.date));
+
+  // ── Readings the user entered (§4.8) ───────────────────────────────────────
+  const readings: ReadingFact[] = (rows.calibrations ?? [])
+    .map((c) => {
+      const ts = new Date(c.observed_at).getTime();
+      const value = Number(c.value);
+      if (!Number.isFinite(ts) || ts < fromMs || ts > toMs) return null;
+      if (!Number.isFinite(value)) return null;
+      return {
+        date: dayKey(ts),
+        medication: medName.get(c.medication_id) ?? "a medication",
+        value,
+        unit: c.unit,
+        note: c.note,
+      };
+    })
+    .filter((x): x is ReadingFact => x !== null)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
   // ── Diary metrics + chart series ───────────────────────────────────────────
   const entriesInRange = rows.diaryEntries.filter((e) => {
     const ts = new Date(e.entry_at).getTime();
@@ -711,6 +785,8 @@ export function computeReportFacts(
     },
     medications,
     adhocMeds,
+    regimenChanges,
+    readings,
     diaryMetrics,
     timeline,
     interactions: [], // populated by buildReportData (curated lookup, rule #9)
@@ -731,7 +807,7 @@ export async function loadReportRows(
   from: string,
   to: string
 ): Promise<ReportRows> {
-  const [patientRes, medsRes, logsRes, diaryRes, fieldsRes, scopeRes] =
+  const [patientRes, medsRes, logsRes, diaryRes, fieldsRes, scopeRes, calRes] =
     await Promise.all([
       supabase.from("patients").select("name, date_of_birth, sex").eq("id", patientId).single(),
       supabase
@@ -769,6 +845,15 @@ export async function loadReportRows(
         .from("tracked_field_medications")
         .select("tracked_field_id, medication_id")
         .eq("patient_id", patientId),
+      // Readings the user entered (§4.8). The RLS-bound client keeps private
+      // medications' readings out for members who can't read them.
+      supabase
+        .from("pk_calibrations")
+        .select("medication_id, value, unit, observed_at, note")
+        .eq("patient_id", patientId)
+        .gte("observed_at", `${from}T00:00:00`)
+        .lte("observed_at", `${to}T23:59:59`)
+        .order("observed_at"),
     ]);
 
   const fieldScope = new Map<string, string[]>();
@@ -785,6 +870,7 @@ export async function loadReportRows(
     diaryEntries: (diaryRes.data ?? []) as unknown as DiaryEntryRow[],
     trackedFields: (fieldsRes.data ?? []) as TrackedFieldRow[],
     fieldScope,
+    calibrations: (calRes.data ?? []) as CalibrationRow[],
   };
 }
 

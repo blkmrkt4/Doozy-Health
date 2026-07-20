@@ -2,6 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getActivePatient } from "@/lib/active-patient";
+import { getDisplayPrefs } from "@/lib/display-prefs";
+import { setSimpleMode } from "./actions";
 
 // Settings hub page. Links to sub-pages (caregivers, tracking, the Health
 // snapshot, account).
@@ -15,6 +17,8 @@ export default async function SettingsPage() {
 
   const active = await getActivePatient(supabase);
   if (!active) redirect("/dashboard");
+
+  const { simpleMode } = await getDisplayPrefs(supabase, user.id);
 
   return (
     <div className="min-h-full">
@@ -60,6 +64,16 @@ export default async function SettingsPage() {
             </>
           ) : null}
           <Link
+            href="/settings/notifications"
+            className="block rounded-md border border-line p-4 hover:border-muted"
+          >
+            <h2 className="text-sm font-medium text-paper">Notifications</h2>
+            <p className="mt-1 text-xs text-faint">
+              Turn on dose reminders and caregiver notifications for this
+              device.
+            </p>
+          </Link>
+          <Link
             href="/report"
             className="block rounded-md border border-line p-4 hover:border-muted"
           >
@@ -69,6 +83,29 @@ export default async function SettingsPage() {
               doses, and tracked measures to bring to a doctor.
             </p>
           </Link>
+          <div className="rounded-md border border-line p-4">
+            <h2 className="text-sm font-medium text-paper">
+              {simpleMode ? "Full view" : "Simple view"}
+            </h2>
+            <p className="mt-1 text-xs text-faint">
+              {simpleMode
+                ? "Bring back the calendar, charts, and full medication detail."
+                : "Larger text and a single Today list of your medications. You can switch back anytime."}
+            </p>
+            <form action={setSimpleMode} className="mt-3">
+              <input
+                type="hidden"
+                name="enable"
+                value={simpleMode ? "false" : "true"}
+              />
+              <button
+                type="submit"
+                className="rounded-md border border-line px-4 py-2 text-sm text-paper hover:border-muted"
+              >
+                {simpleMode ? "Switch to full view" : "Switch to simple view"}
+              </button>
+            </form>
+          </div>
           <Link
             href="/settings/account"
             className="block rounded-md border border-line p-4 hover:border-muted"
