@@ -134,6 +134,17 @@ export default async function TrackingSettingsPage({
           </p>
         ) : null}
 
+        {/* Add your own custom field — kept at the top for quick access, ahead
+            of the templates and the library. */}
+        <details className="rounded-md border border-line">
+          <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium text-accent hover:underline">
+            + Add your own field
+          </summary>
+          <div className="border-t border-line p-4">
+            <TrackedFieldForm meds={meds} />
+          </div>
+        </details>
+
         {/* Templates gallery — "What are you trying to understand?" Each card
             opens the select-&-confirm screen (unscoped from here). */}
         <section className="rounded-md border border-line p-4 space-y-4">
@@ -221,16 +232,6 @@ export default async function TrackingSettingsPage({
         {/* Current fields */}
         <section className="rounded-md border border-line p-4 space-y-3">
           <h2 className="text-sm font-medium text-paper">Your fields</h2>
-
-          {/* Add your own — opens as a twisty at the top of the list. */}
-          <details className="rounded-md border border-line">
-            <summary className="cursor-pointer list-none px-3 py-2 text-sm text-accent hover:underline">
-              + Add your own
-            </summary>
-            <div className="border-t border-line p-3">
-              <TrackedFieldForm meds={meds} />
-            </div>
-          </details>
 
           {trackedFields.length === 0 ? (
             <p className="text-sm text-faint">No fields configured yet.</p>
