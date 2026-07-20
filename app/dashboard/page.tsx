@@ -10,9 +10,7 @@ import { acceptInvite, declineInvite } from "@/app/settings/caregivers/actions";
 import { formatRegimenSummary, relativeAge } from "@/lib/format";
 import { PatientSwitcher } from "@/app/_components/patient-switcher";
 import { CalendarSection } from "@/app/_components/calendar-section";
-import { SimpleToday } from "@/app/dashboard/simple-today";
 import { getDisplayPrefs } from "@/lib/display-prefs";
-import { buildSimpleTodayModel } from "@/lib/simple-today";
 import { MedTimeline } from "@/app/_components/med-timeline";
 import { ChartsToggle } from "@/app/_components/charts-toggle";
 import { QuickLogOtc } from "@/app/_components/quick-log-otc";
@@ -347,30 +345,6 @@ export default async function DashboardPage({
     unit: (r.unit as string | null) ?? null,
   }));
 
-  // Simple mode (users.display_prefs.simple_mode): render the pared-down Today
-  // view from the models already built and skip the heavy per-card wheel / PK /
-  // supplies assembly below entirely — none of it is shown there.
-  if (simpleMode) {
-    return (
-      <SimpleToday
-        activePatient={activePatient}
-        allPatients={allPatients}
-        pendingInvites={pendingInvites.map((inv) => ({
-          ...inv,
-          membershipId: pendingMembershipIds.get(inv.patientId) ?? null,
-        }))}
-        canLog={canLog}
-        model={buildSimpleTodayModel({
-          wheelModel,
-          medMeta,
-          dayLogs: calendarDayLogs,
-        })}
-        medMeta={medMeta}
-        medsWithInteractions={Array.from(medsWithInteractions)}
-      />
-    );
-  }
-
   // A per-drug wheel model for the calendar bar on each medication card.
   const wheelByMed = new Map<string, ReturnType<typeof buildWheelModel>>();
   for (const reg of regimens) {
@@ -399,7 +373,9 @@ export default async function DashboardPage({
         .filter((id): id is string => Boolean(id))
     )
   );
-  if (pkDrugIds.length > 0) {
+  // Simple view drops the graphs: leave the chart map empty and each card
+  // falls back to its plain calendar bar. Everything else stays the same.
+  if (pkDrugIds.length > 0 && !simpleMode) {
     const { data: pkDrugs } = await supabase
       .from("drugs")
       .select(
@@ -630,6 +606,7 @@ export default async function DashboardPage({
             initialDayKey={selectedDayParam}
             diaryFields={diaryFields}
             diaryEntriesByDay={diaryEntriesByDay}
+            simple={simpleMode}
           />
         ) : null}
 
@@ -663,7 +640,7 @@ export default async function DashboardPage({
           <div className="flex items-center gap-2">
             {view === "medications" ? (
               <>
-                <ChartsToggle />
+                {simpleMode ? null : <ChartsToggle />}
                 {isOwner ? (
                   <Link
                     href="/medications/new"
@@ -799,6 +776,7 @@ export default async function DashboardPage({
                         model={medWheel}
                         medNames={medNames}
                         variant="bar"
+                        simple={simpleMode}
                       />
                     </div>
                   ) : null}

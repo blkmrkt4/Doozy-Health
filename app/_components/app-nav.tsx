@@ -130,9 +130,9 @@ const PRIMARY: {
 ];
 
 // Simple view (users.display_prefs.simple_mode): three destinations only —
-// record today's doses, print a summary for the doctor, switch back.
+// the familiar dashboard, a summary for the doctor, and the way back.
 const PRIMARY_SIMPLE: typeof PRIMARY = [
-  { key: "dashboard", label: "Today", href: "/dashboard" },
+  { key: "dashboard", label: "Home", href: "/dashboard" },
   { key: "snapshot", label: "Doctor summary", short: "Summary", href: "/report" },
   { key: "settings", label: "Settings", href: "/settings" },
 ];

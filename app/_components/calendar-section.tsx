@@ -43,6 +43,7 @@ export function CalendarSection({
   initialDayKey,
   diaryFields,
   diaryEntriesByDay,
+  simple = false,
 }: {
   model: WheelModel;
   medNames: Record<string, string>;
@@ -57,6 +58,10 @@ export function CalendarSection({
   initialDayKey?: string;
   diaryFields?: TrackedField[];
   diaryEntriesByDay?: Map<string, DiaryEntry>;
+  // Simple view (users.display_prefs.simple_mode): same calendar, minus the
+  // per-med dots above the dates; the diary opens by default and dose amounts
+  // edit through a small dialog instead of an inline input.
+  simple?: boolean;
 }) {
   const todayKey = model.days[model.todayIndex]?.key ?? model.days[0]?.key;
   const initialKey =
@@ -69,7 +74,12 @@ export function CalendarSection({
 
   if (variant === "bar") {
     return (
-      <DateWheel model={model} selectedKey={selectedKey} onSelect={setSelectedKey} />
+      <DateWheel
+        model={model}
+        selectedKey={selectedKey}
+        onSelect={setSelectedKey}
+        showMedDots={!simple}
+      />
     );
   }
 
@@ -80,7 +90,12 @@ export function CalendarSection({
         <StatusLegend />
       </div>
 
-      <DateWheel model={model} selectedKey={selectedKey} onSelect={setSelectedKey} />
+      <DateWheel
+        model={model}
+        selectedKey={selectedKey}
+        onSelect={setSelectedKey}
+        showMedDots={!simple}
+      />
 
       <DayAgenda
         day={selectedDay}
@@ -90,6 +105,7 @@ export function CalendarSection({
         canLog={canLog}
         diaryFields={diaryFields}
         diaryEntriesByDay={diaryEntriesByDay}
+        simple={simple}
       />
 
       <p className="mt-3 text-xs text-faint">

@@ -20,6 +20,7 @@ export function DayAgenda({
   canLog = false,
   diaryFields,
   diaryEntriesByDay,
+  simple = false,
 }: {
   day: WheelDay | null;
   medNames: Record<string, string>;
@@ -28,6 +29,9 @@ export function DayAgenda({
   canLog?: boolean;
   diaryFields?: TrackedField[];
   diaryEntriesByDay?: Map<string, DiaryEntry>;
+  // Simple view: dose amounts edit via a small dialog (tapping the green dot
+  // still just logs), and the diary opens without the twisty tap.
+  simple?: boolean;
 }) {
   const reduce = useReducedMotion();
   if (!day) return null;
@@ -83,6 +87,7 @@ export function DayAgenda({
                 dayMs={day.ms}
                 isToday={day.isToday}
                 canLog={canLog}
+                simple={simple}
               />
             </li>
           ))}
@@ -96,6 +101,7 @@ export function DayAgenda({
           entry={diaryEntriesByDay?.get(day.key) ?? null}
           medNames={medNames}
           canLog={canLog}
+          defaultOpen={simple}
         />
       ) : null}
     </motion.div>

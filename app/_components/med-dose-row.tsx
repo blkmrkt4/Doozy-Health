@@ -78,6 +78,7 @@ export function MedDoseRow({
   canLog,
   minDots = 0,
   dotsOnly = false,
+  simple = false,
 }: {
   meta: MedLogMeta | undefined;
   medColour: string;
@@ -94,11 +95,16 @@ export function MedDoseRow({
   // Render only the check-dots (no name/dose/status) — for the dashboard cards,
   // where the name and dose already appear in the card.
   dotsOnly?: boolean;
+  // Simple view: the dose shows as plain text; tapping it opens a small dialog
+  // to change the amount. Tapping a green dot still just logs — no dialog.
+  simple?: boolean;
 }) {
   const reduce = useReducedMotion() ?? false;
   const [, startTransition] = useTransition();
   const [optimistic, setOptimistic] = useState(logged);
   const [animIndex, setAnimIndex] = useState<number | null>(null);
+  const [doseDialogOpen, setDoseDialogOpen] = useState(false);
+  const [dialogDose, setDialogDose] = useState("");
 
   // Reconcile with the server count after each revalidate.
   useEffect(() => {
@@ -185,7 +191,7 @@ export function MedDoseRow({
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-[18px] sm:pl-0">
           {meta ? (
             <span className="flex items-center gap-1 text-muted">
-              {canLog ? (
+              {canLog && !simple ? (
                 <input
                   type="number"
                   min={0}
@@ -195,6 +201,20 @@ export function MedDoseRow({
                   aria-label="Dose"
                   className="w-14 rounded-md border border-line bg-surface px-2 py-0.5 text-sm tabular text-paper outline-none focus:border-accent"
                 />
+              ) : canLog && simple ? (
+                // Simple view: the amount is plain text; tapping it opens the
+                // change-amount dialog. Logging stays a one-tap dot.
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDialogDose(dose);
+                    setDoseDialogOpen(true);
+                  }}
+                  aria-label={`Change the ${medName} amount`}
+                  className="rounded-md px-1 tabular underline decoration-dotted underline-offset-4 hover:text-paper"
+                >
+                  {dose}
+                </button>
               ) : (
                 <span className="tabular">{dose}</span>
               )}
@@ -210,6 +230,64 @@ export function MedDoseRow({
       </div>
 
       <div className="ml-auto shrink-0">{dots}</div>
+
+      {/* Simple-view change-amount dialog. Only affects doses logged after
+          the change — exactly like editing the inline figure in the full view. */}
+      {doseDialogOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Change the ${medName} amount`}
+          onClick={() => setDoseDialogOpen(false)}
+        >
+          <div
+            className="w-full max-w-xs rounded-lg border border-line bg-surface p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-base font-medium text-paper blur-private">{medName}</p>
+            <label className="mt-3 block text-sm text-muted" htmlFor={`dose-dialog-${meta?.medId}`}>
+              Amount to record per dose
+            </label>
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                id={`dose-dialog-${meta?.medId}`}
+                type="number"
+                min={0}
+                step="any"
+                inputMode="decimal"
+                autoFocus
+                value={dialogDose}
+                onChange={(e) => setDialogDose(e.target.value)}
+                className="w-24 rounded-md border border-line bg-ink px-3 py-2 text-base tabular text-paper outline-none focus:border-accent"
+              />
+              <span className="text-base text-muted">{doseUnitLabel}</span>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDoseDialogOpen(false)}
+                className="rounded-md px-3 py-2 text-sm text-faint hover:text-muted"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const n = Number(dialogDose);
+                  if (Number.isFinite(n) && n > 0) {
+                    setDose(dialogDose);
+                    setDoseDialogOpen(false);
+                  }
+                }}
+                className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent hover:opacity-90"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

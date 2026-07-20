@@ -44,6 +44,7 @@ export function DateWheel({
   selectedKey,
   onSelect,
   onScrub,
+  showMedDots = true,
 }: {
   model: WheelModel;
   selectedKey: string;
@@ -52,6 +53,10 @@ export function DateWheel({
   // including mid-drag — so a synced view (e.g. the amount-in-system chart) can
   // track the wheel. Optional: the standalone calendar ignores it.
   onScrub?: (ms: number) => void;
+  // Simple view hides the per-medication identity dots above the day numbers;
+  // the grade fill on the number carries the record. Everything else behaves
+  // exactly as always.
+  showMedDots?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerW, setContainerW] = useState(0);
@@ -217,6 +222,7 @@ export function DateWheel({
               day={day}
               selected={i === selectedIndex}
               singleMed={singleMed}
+              showMedDots={showMedDots}
               onTap={() => {
                 if (movedRef.current) return; // it was a drag, not a tap
                 settleTo(i);
@@ -233,11 +239,13 @@ function DateCell({
   day,
   selected,
   singleMed,
+  showMedDots,
   onTap,
 }: {
   day: WheelDay;
   selected: boolean;
   singleMed: boolean;
+  showMedDots: boolean;
   onTap: () => void;
 }) {
   const { background, colour } = cellStyle(day);
@@ -268,8 +276,9 @@ function DateCell({
 
       {/* Per-medication dots. Solid = taken in full (right dose, right number of
           times); empty ring = not (yet). A single-medication wheel shows one
-          larger, centred dot; multi-med shows 3 per row over up to two rows. */}
-      {singleMed ? (
+          larger, centred dot; multi-med shows 3 per row over up to two rows.
+          Hidden entirely in simple view. */}
+      {!showMedDots ? null : singleMed ? (
         <span className="flex min-h-[16px] items-center justify-center">
           {shownMeds[0]
             ? (() => {

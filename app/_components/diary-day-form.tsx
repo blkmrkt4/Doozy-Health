@@ -22,7 +22,7 @@ export function DiaryDayForm({
   medNames,
   canLog,
   hideNotes = false,
-  simple = false,
+  defaultOpen = false,
 }: {
   dayDate: string;
   fields: TrackedField[];
@@ -32,9 +32,8 @@ export function DiaryDayForm({
   // Per-medication card context: hide the shared day-level Notes box (notes
   // belong to the day, not a single medication).
   hideNotes?: boolean;
-  // Simple mode's Today check-in: always open (no twisty), larger tap targets,
-  // daily fields only — periodic labs stay off the daily list entirely.
-  simple?: boolean;
+  // Simple view: the diary starts open — no "tap to open" step. Same form.
+  defaultOpen?: boolean;
 }) {
   const path = usePathname() ?? "/dashboard";
   const [, startTransition] = useTransition();
@@ -70,10 +69,7 @@ export function DiaryDayForm({
     return names.length ? names.join(", ") : null;
   }
 
-  // Larger chips for simple mode's older-audience tap targets.
-  const chip = simple
-    ? "rounded-full border px-4 py-2.5 text-base transition-colors cursor-pointer select-none"
-    : chipBase;
+  const chip = chipBase;
 
   function control(field: TrackedField) {
     const v = values[field.id];
@@ -220,8 +216,8 @@ export function DiaryDayForm({
   const renderRow = (field: TrackedField) => {
     const t = tag(field);
     return (
-      <div key={field.id} className={simple ? "space-y-2" : "space-y-1"}>
-        <p className={simple ? "text-lg text-paper" : "text-sm text-muted"}>
+      <div key={field.id} className="space-y-1">
+        <p className="text-sm text-muted">
           {field.name}
           {field.unit ? <span className="ml-1 text-xs text-faint">({field.unit})</span> : null}
           {t ? <span className="ml-2 text-[11px] text-faint">· {t}</span> : null}
@@ -231,34 +227,8 @@ export function DiaryDayForm({
     );
   };
 
-  // Simple mode: the configured daily questions render open on the Today view
-  // — no twisty, no periodic labs section. Skippable by nature: an unanswered
-  // question saves nothing.
-  if (simple) {
-    if (dailyFields.length === 0) return null;
-    return (
-      <div className="space-y-5">
-        {dailyFields.map(renderRow)}
-        {hideNotes ? null : (
-          <div className="space-y-2">
-            <p className="text-lg text-paper">Notes</p>
-            <textarea
-              rows={2}
-              disabled={!canLog}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              onBlur={commitNote}
-              placeholder="Anything else about today…"
-              className="block w-full rounded-md border border-line bg-surface px-3 py-2 text-base text-paper outline-none focus:border-accent"
-            />
-          </div>
-        )}
-      </div>
-    );
-  }
-
   return (
-    <details className="mt-3 rounded-md border border-line">
+    <details className="mt-3 rounded-md border border-line" open={defaultOpen}>
       <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2 text-sm font-medium text-paper">
         <span className="flex items-center gap-2">
           <svg
@@ -278,7 +248,9 @@ export function DiaryDayForm({
           </svg>
           Diary
         </span>
-        <span className="text-xs text-faint">tap to open</span>
+        {defaultOpen ? null : (
+          <span className="text-xs text-faint">tap to open</span>
+        )}
       </summary>
       <div className="space-y-4 border-t border-line p-4">
         {fields.length === 0 ? (
