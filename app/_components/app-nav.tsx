@@ -369,14 +369,21 @@ export function AppNav({
           onClick={() => setOpen(false)}
           className={`absolute inset-0 bg-black/50 transition-opacity duration-300 ${open ? "opacity-100" : "opacity-0"}`}
         />
-        <aside
-          className={`absolute inset-y-0 left-0 flex w-72 max-w-[82vw] flex-col border-r border-line bg-ink transition-transform duration-300 ${open ? "translate-x-0" : "-translate-x-full"}`}
-          style={{
-            paddingTop: "env(safe-area-inset-top)",
-            paddingBottom: "env(safe-area-inset-bottom)",
-          }}
-        >
-          <div className="flex items-center justify-between px-4 py-3">
+        {/* On large screens the panel anchors inside the same centered rail as
+            the top bar, so it opens left-aligned under the hamburger instead of
+            sliding in from the far viewport edge. Small screens keep the
+            full-height drawer (the hamburger already sits at the edge there). */}
+        <div className="pointer-events-none relative mx-auto h-full max-w-5xl lg:px-4">
+          <aside
+            className={`pointer-events-auto absolute inset-y-0 left-0 flex w-72 max-w-[82vw] flex-col border-r border-line bg-ink transition-[transform,opacity] duration-300 lg:inset-y-auto lg:left-4 lg:top-[calc(env(safe-area-inset-top)+3.875rem)] lg:max-h-[80vh] lg:rounded-2xl lg:border lg:shadow-xl ${open ? "translate-x-0 lg:opacity-100" : "-translate-x-full lg:translate-x-0 lg:opacity-0"}`}
+            style={{
+              paddingTop: "env(safe-area-inset-top)",
+              paddingBottom: "env(safe-area-inset-bottom)",
+            }}
+          >
+          {/* Drawer header — redundant in the anchored large-screen dropdown
+              (the top bar with the wordmark is right above it), so mobile-only. */}
+          <div className="flex items-center justify-between px-4 py-3 lg:hidden">
             {wordmark}
             <button
               type="button"
@@ -392,7 +399,7 @@ export function AppNav({
           <Link
             href="/settings/account"
             onClick={() => setOpen(false)}
-            className="mx-3 flex items-center gap-3 rounded-xl border border-line px-3 py-2 transition-colors hover:bg-surface"
+            className="mx-3 flex items-center gap-3 rounded-xl border border-line px-3 py-2 transition-colors hover:bg-surface lg:mt-3"
           >
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface text-muted">
               {icons.account}
@@ -448,7 +455,8 @@ export function AppNav({
               Sign out
             </button>
           </form>
-        </aside>
+          </aside>
+        </div>
       </div>
     </>
   );
