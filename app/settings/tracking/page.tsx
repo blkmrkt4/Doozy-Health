@@ -50,6 +50,10 @@ export default async function TrackingSettingsPage({
     active: boolean;
     display_order: number;
   }>;
+  // The three boxes: active fields live under "Currently tracking"; disabled
+  // ones are "Fields you've tracked in the past" (re-enable to resume).
+  const activeFields = trackedFields.filter((f) => f.active);
+  const pastFields = trackedFields.filter((f) => !f.active);
 
   // Medications (for the "applies to" picker + field tags) and the scope links.
   const { data: medRows } = await supabase
@@ -134,30 +138,108 @@ export default async function TrackingSettingsPage({
           </p>
         ) : null}
 
-        {/* Add your own custom field — kept at the top for quick access, ahead
-            of the templates and the library. */}
-        <details className="rounded-md border border-line">
-          <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium text-accent hover:underline">
-            + Add your own field
-          </summary>
-          <div className="border-t border-line p-4">
-            <TrackedFieldForm meds={meds} />
-          </div>
-        </details>
-
-        {/* Templates gallery — "What are you trying to understand?" Each card
-            opens the select-&-confirm screen (unscoped from here). */}
+        {/* 1 — Create your own. Always open; the active fields live in a
+            "Currently tracking" twisty inside this box. */}
         <section className="rounded-md border border-line p-4 space-y-4">
           <div>
-            <h2 className="text-sm font-medium text-paper">
-              Start from a template
+            <h2 className="text-base font-semibold text-paper">
+              Create your own tracking field
             </h2>
             <p className="mt-0.5 text-xs text-faint">
-              Curated sets of fields people commonly track. Pick one to start —
-              you choose what to keep before anything is added.
+              Track anything — mood, sleep, symptoms, a measurement. No defaults
+              are imposed.
             </p>
           </div>
 
+          <TrackedFieldForm meds={meds} />
+
+          <details className="rounded-md border border-line">
+            <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3">
+              <span className="text-sm font-medium text-paper">
+                Currently tracking
+                {activeFields.length > 0 ? ` (${activeFields.length})` : ""}
+              </span>
+              <span className="text-xs text-faint">tap to open</span>
+            </summary>
+            <div className="border-t border-line px-4 pb-2">
+              {activeFields.length === 0 ? (
+                <p className="py-3 text-sm text-faint">
+                  Nothing tracked yet. Create a field above or start from a
+                  template below.
+                </p>
+              ) : (
+                <ul className="divide-y divide-line">
+                  {activeFields.map((f) => (
+                    <li
+                      key={f.id}
+                      className="flex items-center justify-between gap-3 py-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm text-paper">
+                          {f.name}
+                          {f.unit ? (
+                            <span className="ml-1 text-xs text-faint">
+                              ({f.unit})
+                            </span>
+                          ) : null}
+                        </p>
+                        <p className="text-xs text-faint">
+                          {f.field_type.replace("_", " ")}
+                          {f.category_options
+                            ? `: ${(f.category_options as string[]).join(", ")}`
+                            : null}
+                        </p>
+                        <p className="text-[11px] text-faint">
+                          {tagsByField.get(f.id)?.length
+                            ? `for: ${tagsByField.get(f.id)!.join(", ")}`
+                            : "all medications"}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 gap-2">
+                        <form action={updateTrackedField}>
+                          <input type="hidden" name="field_id" value={f.id} />
+                          <input type="hidden" name="active" value="false" />
+                          <button
+                            type="submit"
+                            className="text-xs text-muted underline hover:text-paper"
+                          >
+                            stop tracking
+                          </button>
+                        </form>
+                        <form action={deleteTrackedField}>
+                          <input type="hidden" name="field_id" value={f.id} />
+                          <button
+                            type="submit"
+                            className="text-xs text-faint underline hover:text-red-400"
+                          >
+                            remove
+                          </button>
+                        </form>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </details>
+        </section>
+
+        {/* 2 — Templates gallery + the single-field library, together behind
+            one expandable box. Each template card opens select-&-confirm. */}
+        <details className="rounded-md border border-line">
+          <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3">
+            <span>
+              <span className="block text-base font-semibold text-paper">
+                Start from a template
+              </span>
+              <span className="mt-0.5 block text-xs text-faint">
+                Curated sets and single fields people commonly track — you
+                choose what to keep before anything is added.
+              </span>
+            </span>
+            <span className="shrink-0 text-xs text-faint">tap to open</span>
+          </summary>
+          <div className="space-y-4 border-t border-line p-4">
           {(Object.keys(galleryByKind) as DiaryTemplate["kind"][]).map((kind) => {
             const items = galleryByKind[kind];
             if (items.length === 0) return null;
@@ -227,79 +309,11 @@ export default async function TrackingSettingsPage({
               </div>
             </form>
           </details>
-        </section>
 
-        {/* Current fields */}
-        <section className="rounded-md border border-line p-4 space-y-3">
-          <h2 className="text-sm font-medium text-paper">Your fields</h2>
-
-          {trackedFields.length === 0 ? (
-            <p className="text-sm text-faint">No fields configured yet.</p>
-          ) : (
-            <ul className="divide-y divide-line">
-              {trackedFields.map((f) => (
-                <li
-                  key={f.id}
-                  className="flex items-center justify-between gap-3 py-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p
-                      className={`text-sm ${f.active ? "text-paper" : "text-faint line-through"}`}
-                    >
-                      {f.name}
-                      {f.unit ? (
-                        <span className="ml-1 text-xs text-faint">
-                          ({f.unit})
-                        </span>
-                      ) : null}
-                    </p>
-                    <p className="text-xs text-faint">
-                      {f.field_type.replace("_", " ")}
-                      {f.category_options
-                        ? `: ${(f.category_options as string[]).join(", ")}`
-                        : null}
-                    </p>
-                    <p className="text-[11px] text-faint">
-                      {tagsByField.get(f.id)?.length
-                        ? `for: ${tagsByField.get(f.id)!.join(", ")}`
-                        : "all medications"}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 gap-2">
-                    <form action={updateTrackedField}>
-                      <input type="hidden" name="field_id" value={f.id} />
-                      <input
-                        type="hidden"
-                        name="active"
-                        value={f.active ? "false" : "true"}
-                      />
-                      <button
-                        type="submit"
-                        className="text-xs text-muted underline hover:text-paper"
-                      >
-                        {f.active ? "disable" : "enable"}
-                      </button>
-                    </form>
-                    <form action={deleteTrackedField}>
-                      <input type="hidden" name="field_id" value={f.id} />
-                      <button
-                        type="submit"
-                        className="text-xs text-faint underline hover:text-red-400"
-                      >
-                        remove
-                      </button>
-                    </form>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        {/* Library — one row per field, grouped; "Add" to start tracking it. */}
-        <section className="rounded-md border border-line p-4 space-y-4">
-          <h2 className="text-sm font-medium text-paper">Add from the library</h2>
-          {libraryGroups.map((group) => {
+          {/* Single fields from the library — one row per field, grouped. */}
+          <div className="space-y-4 border-t border-line pt-4">
+            <p className="text-sm font-medium text-paper">Single fields</p>
+            {libraryGroups.map((group) => {
             const items = DIARY_PRESETS.filter(
               (p) => p.group === group && !existingNames.has(p.name.toLowerCase())
             );
@@ -349,7 +363,80 @@ export default async function TrackingSettingsPage({
               </div>
             );
           })}
-        </section>
+          </div>
+          </div>
+        </details>
+
+        {/* 3 — Past fields: stopped/disabled fields land here and can resume
+            tracking (their logged history is untouched either way). */}
+        <details className="rounded-md border border-line">
+          <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3">
+            <span>
+              <span className="block text-base font-semibold text-paper">
+                Fields you&rsquo;ve tracked in the past
+                {pastFields.length > 0 ? ` (${pastFields.length})` : ""}
+              </span>
+              <span className="mt-0.5 block text-xs text-faint">
+                Fields you stopped tracking — pick one up again anytime.
+              </span>
+            </span>
+            <span className="shrink-0 text-xs text-faint">tap to open</span>
+          </summary>
+          <div className="border-t border-line px-4 pb-2">
+            {pastFields.length === 0 ? (
+              <p className="py-3 text-sm text-faint">
+                Nothing here yet. When you stop tracking a field, it moves here.
+              </p>
+            ) : (
+              <ul className="divide-y divide-line">
+                {pastFields.map((f) => (
+                  <li
+                    key={f.id}
+                    className="flex items-center justify-between gap-3 py-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-muted">
+                        {f.name}
+                        {f.unit ? (
+                          <span className="ml-1 text-xs text-faint">
+                            ({f.unit})
+                          </span>
+                        ) : null}
+                      </p>
+                      <p className="text-xs text-faint">
+                        {f.field_type.replace("_", " ")}
+                        {f.category_options
+                          ? `: ${(f.category_options as string[]).join(", ")}`
+                          : null}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 gap-2">
+                      <form action={updateTrackedField}>
+                        <input type="hidden" name="field_id" value={f.id} />
+                        <input type="hidden" name="active" value="true" />
+                        <button
+                          type="submit"
+                          className="rounded-md border border-line px-3 py-1 text-xs text-muted transition-colors hover:bg-surface"
+                        >
+                          Track again
+                        </button>
+                      </form>
+                      <form action={deleteTrackedField}>
+                        <input type="hidden" name="field_id" value={f.id} />
+                        <button
+                          type="submit"
+                          className="text-xs text-faint underline hover:text-red-400"
+                        >
+                          remove
+                        </button>
+                      </form>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </details>
       </main>
     </div>
   );
