@@ -36,7 +36,7 @@ export function PrivacyToggle() {
       onClick={toggle}
       className={`rounded-md border px-2 py-1 text-xs transition-colors ${
         active
-          ? "border-accent bg-accent/10 text-accent"
+          ? "border-accent bg-accent-surface text-accent"
           : "border-line text-faint hover:text-muted"
       }`}
       title={active ? "Privacy mode on — tap to show" : "Privacy mode off — tap to blur"}

@@ -133,7 +133,7 @@ export default async function DiaryPage() {
           <div className="flex shrink-0 items-center gap-2">
             <Link
               href="/report"
-              className="rounded-md border border-accent px-3 py-1.5 text-sm font-medium text-accent transition-opacity hover:opacity-90"
+              className="rounded-md border border-accent bg-accent-surface px-3 py-1.5 text-sm font-medium text-accent transition-opacity hover:opacity-90"
             >
               Create snapshot
             </Link>

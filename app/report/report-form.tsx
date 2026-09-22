@@ -185,7 +185,7 @@ export function ReportForm({
                 type="button"
                 onClick={generateSummary}
                 disabled={summarizing}
-                className="shrink-0 rounded-md border border-accent px-3 py-2 text-sm font-medium text-accent transition-opacity hover:opacity-90 disabled:opacity-50"
+                className="shrink-0 rounded-md border border-accent bg-accent-surface px-3 py-2 text-sm font-medium text-accent transition-opacity hover:opacity-90 disabled:opacity-50"
               >
                 {summarizing ? "Writing…" : summaryDone ? "Regenerate" : "Generate summary"}
               </button>

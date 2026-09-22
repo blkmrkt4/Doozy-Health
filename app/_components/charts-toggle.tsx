@@ -35,7 +35,7 @@ export function ChartsToggle() {
       className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors ${
         hidden
           ? "border-line text-faint hover:text-muted"
-          : "border-accent bg-accent/10 text-accent"
+          : "border-accent bg-accent-surface text-accent"
       }`}
       title={hidden ? "Graphs hidden — tap to show" : "Graphs shown — tap to hide"}
     >

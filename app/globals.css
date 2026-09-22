@@ -16,6 +16,8 @@
      because the accent is yellow in both. Decoupled from --color-ink so the page
      background can flip without making accent buttons unreadable. */
   --color-on-accent: #141104;
+  /* Yellow labels need a stable dark surface even when the page is light. */
+  --color-accent-surface: #141414;
 
   /* Monochrome ramp — dark theme (default). */
   --color-ink: #000000; /* page background */

@@ -4,6 +4,7 @@ import { Fragment, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "@/app/login/actions";
+import { ThemeToggle } from "@/app/_components/theme-toggle";
 
 // Hybrid responsive navigation (PRD §9; mobile-first).
 //   • Large screens → a permanent horizontal top bar of primary items.
@@ -261,7 +262,7 @@ export function AppNav({
             onClick={() => setOpen(true)}
             aria-label="Open menu"
             title="Menu"
-            className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-line text-muted transition-colors hover:bg-surface hover:text-paper"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-line text-muted transition-colors hover:bg-surface hover:text-paper"
           >
             {icons.menu}
           </button>
@@ -277,13 +278,9 @@ export function AppNav({
               // Active = inverted fill. Inactive = transparent, fills on hover.
               const container = isActive
                 ? "border-paper bg-paper text-ink font-medium"
-                : "border-transparent text-muted hover:bg-surface hover:text-paper";
-              // The accent action keeps its tint until it's the active pill.
-              const iconTone = isActive
-                ? ""
                 : item.accent
-                  ? "text-accent"
-                  : "";
+                  ? "border-accent bg-accent-surface text-accent hover:opacity-90"
+                  : "border-transparent text-muted hover:bg-surface hover:text-paper";
               const labelState = isActive
                 ? "ml-2 max-w-[9rem] opacity-100"
                 : "ml-0 max-w-0 opacity-0 group-hover:ml-2 group-hover:max-w-[9rem] group-hover:opacity-100";
@@ -299,7 +296,7 @@ export function AppNav({
                     aria-current={isActive ? "page" : undefined}
                     className={`group inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl border px-2.5 transition-colors ${container}`}
                   >
-                    <span className={`relative flex h-6 w-6 shrink-0 items-center justify-center ${iconTone}`}>
+                    <span className="relative flex h-6 w-6 shrink-0 items-center justify-center">
                       {icons[item.key]}
                       {item.key === "notifications" && unreadCount > 0 ? dot : null}
                     </span>
@@ -313,6 +310,9 @@ export function AppNav({
               );
             })}
           </nav>
+          <div className="ml-auto shrink-0">
+            <ThemeToggle compact />
+          </div>
         </div>
       </header>
 
@@ -330,7 +330,7 @@ export function AppNav({
           {items.map((item) => {
             const isActive = current === item.key;
             const tone = item.accent
-              ? "text-accent"
+              ? "rounded-xl bg-accent-surface text-accent"
               : isActive
                 ? "text-paper"
                 : "text-faint";
@@ -434,7 +434,7 @@ export function AppNav({
                 {privacy ? "Show values" : "Hide values"}
               </span>
               <span
-                className={`rounded-full border px-2 py-0.5 text-[11px] ${privacy ? "border-accent text-accent" : "border-line text-faint"}`}
+                className={`rounded-full border px-2 py-0.5 text-[11px] ${privacy ? "border-accent bg-accent-surface text-accent" : "border-line text-faint"}`}
               >
                 {privacy ? "Hidden" : "Visible"}
               </span>
