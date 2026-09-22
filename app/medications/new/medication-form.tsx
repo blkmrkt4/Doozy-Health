@@ -136,8 +136,8 @@ export function MedicationForm({
 
   const showSyringe = INJECTABLE_FORM_TYPES.has(formType);
 
-  // Live checklist status — read from the form on each input (fields stay
-  // uncontrolled). Green ticks appear as each component is filled in.
+  // Live checklist status — read the optional fields from the form after
+  // their change handlers run. Green ticks appear as each component is filled in.
   const formRef = useRef<HTMLFormElement>(null);
   const [st, setSt] = useState({
     label: Number(init.delivery?.concAmount ?? 0) > 0,
@@ -242,8 +242,14 @@ export function MedicationForm({
     <form
       ref={formRef}
       action={action}
-      onInput={(e) => { recompute(); if ((e.target as HTMLInputElement).name !== "plan_confirmed") setConfirmed(false); }}
-      onChange={recompute}
+      // Native selects emit input before change. Re-rendering on input restores
+      // their old controlled value before the field's onChange can record it.
+      onChange={(e) => {
+        recompute();
+        if (!(e.target instanceof HTMLInputElement && e.target.name === "plan_confirmed")) {
+          setConfirmed(false);
+        }
+      }}
       className="space-y-3"
     >
       {medicationId ? (
