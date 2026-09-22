@@ -17,17 +17,13 @@ import {
 import {
   DOSE_UNITS,
   FORM_TYPES,
-  FREQUENCY_PERIODS,
-  FREQUENCY_UNITS,
   ROUTES,
   normaliseRoute,
   guessFormType,
   isCountDoseUnit,
   type Concentration,
-  type DoseUnit,
   type Frequency,
   type Reconstitution,
-  type Route,
   type SyringeSpec,
 } from "@/lib/types";
 import {
@@ -40,7 +36,8 @@ import {
 } from "@/lib/extraction";
 import { accessoriesFromRequiredComponents } from "@/lib/medication-setup";
 import { resolveOrCreateCanonicalDrug } from "@/lib/drug-reference";
-import { generateReminders } from "@/lib/reminders";
+import { parsePlanFrequency, readRegimenInput, type RegimenInput } from "@/lib/regimen-plan";
+import { generateReminders, refreshMedicationReminders } from "@/lib/reminders";
 import { explainInteraction } from "@/lib/interactions";
 import { onDoseLogged, onDoseLogDeleted } from "@/lib/notifications-server";
 import { nextMedColour } from "@/lib/colours";
@@ -124,32 +121,7 @@ function inSet<T extends string>(
   return (set as readonly string[]).includes(value) ? (value as T) : null;
 }
 
-// Build a Frequency from a set of prefixed form fields, e.g. prefix
-// "prescribed_freq" reads prescribed_freq_type / _interval / _unit / etc.
-function parseFrequency(formData: FormData, prefix: string): Frequency | null {
-  const type = str(formData, `${prefix}_type`);
-  if (type === "as_needed") return { type: "as_needed" };
-  if (type === "every") {
-    const interval = Number(str(formData, `${prefix}_interval`));
-    const unit = inSet(str(formData, `${prefix}_unit`), FREQUENCY_UNITS);
-    if (!Number.isFinite(interval) || interval <= 0 || !unit) return null;
-    return { type: "every", interval, unit };
-  }
-  if (type === "times_per") {
-    const count = Number(str(formData, `${prefix}_count`));
-    const period = inSet(str(formData, `${prefix}_period`), FREQUENCY_PERIODS);
-    if (!Number.isFinite(count) || count <= 0 || !period) return null;
-    return { type: "times_per", count, period };
-  }
-  return null;
-}
-
-type RegimenInput = {
-  dose_amount: number;
-  dose_unit: DoseUnit;
-  route: Route;
-  frequency: Frequency;
-};
+const parseFrequency = parsePlanFrequency;
 
 function parseRegimen(
   formData: FormData,
@@ -157,17 +129,9 @@ function parseRegimen(
   label: string,
   fail: (msg: string) => never = failNew
 ): RegimenInput {
-  const dose_amount = Number(str(formData, `${prefix}_dose_amount`));
-  if (!Number.isFinite(dose_amount) || dose_amount <= 0) {
-    fail(`Enter a ${label} dose amount greater than zero.`);
-  }
-  const dose_unit = inSet(str(formData, `${prefix}_dose_unit`), DOSE_UNITS);
-  if (!dose_unit) fail(`Choose a valid ${label} dose unit.`);
-  const route = inSet(str(formData, `${prefix}_route`), ROUTES);
-  if (!route) fail(`Choose a valid ${label} route.`);
-  const frequency = parseFrequency(formData, `${prefix}_freq`);
-  if (!frequency) fail(`Complete the ${label} frequency.`);
-  return { dose_amount, dose_unit, route, frequency };
+  const result = readRegimenInput(formData, prefix);
+  if (!result) fail(`Complete the ${label} amount, route, and schedule.`);
+  return result;
 }
 
 export async function createMedication(formData: FormData) {
@@ -235,6 +199,9 @@ export async function createMedication(formData: FormData) {
 
   // Chosen regimen: defaults to the prescribed regimen unless the user marks
   // that they take it differently (PRD §5.3).
+  if (formData.get("plan_review_required") === "on" && formData.get("plan_confirmed") !== "on") {
+    failNew("Confirm that the plan describes what you entered.");
+  }
   const choseDiffers = formData.get("chosen_differs") === "on";
   const chosen = choseDiffers
     ? parseRegimen(formData, "chosen", "chosen")
@@ -301,7 +268,7 @@ export async function createMedication(formData: FormData) {
  * Edit a medication — the same shape as creation (PRD §5.2.1, §5.3). The
  * prescribed regimen is immutable, so a change records a NEW prescription row
  * (history is kept and shown in the doctor PDF); the delivery form is likewise
- * versioned (a new fill); the chosen regimen is updated in place. Owner-only,
+ * versioned (a new fill); changes to the chosen regimen are versioned too. Owner-only,
  * matching the regimen RLS policies and PRD §5.6. The dashboard wheel and PK
  * chart recompute from the updated values on next render.
  */
@@ -379,6 +346,9 @@ export async function updateMedication(formData: FormData) {
     };
   }
 
+  if (formData.get("plan_review_required") === "on" && formData.get("plan_confirmed") !== "on") {
+    failEdit("Confirm that the plan describes what you entered.");
+  }
   const choseDiffers = formData.get("chosen_differs") === "on";
   const chosen = choseDiffers
     ? parseRegimen(formData, "chosen", "chosen", failEdit)
@@ -465,6 +435,12 @@ export async function updateMedication(formData: FormData) {
     if (chosenErr) {
       failEdit(`Could not save how you take it: ${chosenErr.message}`);
     }
+  }
+
+  try {
+    await refreshMedicationReminders(medId, regimenChanged);
+  } catch {
+    failEdit("Your plan was saved, but reminders could not be refreshed. Save again to retry.");
   }
 
   revalidatePath("/dashboard");

@@ -21,11 +21,7 @@ type FreqInit = NonNullable<MedicationFormInitial["prescribed"]>["freq"];
 
 function freqInit(freq: unknown): FreqInit {
   if (isFrequency(freq)) {
-    if (freq.type === "every")
-      return { type: "every", interval: freq.interval, unit: freq.unit };
-    if (freq.type === "times_per")
-      return { type: "times_per", count: freq.count, period: freq.period };
-    return { type: "as_needed" };
+    return freq;
   }
   return { type: "every" };
 }
@@ -173,8 +169,7 @@ export default async function EditMedicationPage({
 
         <p className="mb-6 text-xs text-faint">
           Editing &ldquo;what was prescribed&rdquo; records a new prescription
-          and keeps the previous one as history. Reminders are managed from the
-          medication page.
+          and keeps the previous one as history. Any enabled reminders update to match the plan you save.
         </p>
 
         <MedicationForm

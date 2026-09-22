@@ -18,15 +18,18 @@ const inputCls =
 export function DrugSearch({
   initialName = "",
   initialCanonicalId = "",
+  onNameChange,
 }: {
   initialName?: string;
   initialCanonicalId?: string;
+  onNameChange?: (value: string) => void;
 } = {}) {
   const [value, setValue] = useState(initialName);
   const [canonicalId, setCanonicalId] = useState(initialCanonicalId);
   const [results, setResults] = useState<Result[]>([]);
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => onNameChange?.(value), [value, onNameChange]);
 
   useEffect(() => {
     const q = value.trim();

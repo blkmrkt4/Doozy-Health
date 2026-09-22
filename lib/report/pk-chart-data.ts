@@ -1,7 +1,8 @@
+import { readableNumber } from "@/lib/regimen-plan";
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveParams } from "@/lib/pharmacokinetics";
-import { frequencyIntervalMs } from "@/lib/schedule";
+import { averageIntervalMs } from "@/lib/schedule";
 import {
   provenanceFromReferenceData,
   type DrugPK,
@@ -93,11 +94,13 @@ export async function buildReportPkCharts(
     const doses = (dosesByMed.get(m.id) ?? []).sort((a, b) => a.t - b.t);
     if (doses.length === 0) continue; // nothing logged for this med in range
 
-    const intervalMs = frequencyIntervalMs(chosen.frequency);
+    const intervalMs = averageIntervalMs(chosen.frequency);
     const intervalDays = intervalMs ? intervalMs / MS_DAY : 7;
     const perDose = Number(chosen.dose_amount);
     const perPeriodDose =
-      intervalDays > 0 ? Math.round(perDose * (7 / intervalDays)) : undefined;
+      chosen.frequency.type === "weekly"
+          ? chosen.frequency.weekly_total ?? perDose * chosen.frequency.days.length
+          : intervalDays > 0 ? Math.round(perDose * (7 / intervalDays)) : undefined;
 
     const drugPk: DrugPK = {
       name: m.display_name,
@@ -119,11 +122,12 @@ export async function buildReportPkCharts(
     };
 
     const prescribed: PrescribedRegimen = {
+      weeklyOffsets: chosen.frequency.type === "weekly" ? chosen.frequency.days.map((d) => d - 1) : undefined,
       perDose,
       intervalDays,
       perPeriodDose,
       perPeriodLabel: perPeriodDose
-        ? `${perPeriodDose} ${chosen.dose_unit} per week (what goes in)`
+        ? `${readableNumber(perPeriodDose)} ${chosen.dose_unit} per week (what goes in)`
         : undefined,
     };
 

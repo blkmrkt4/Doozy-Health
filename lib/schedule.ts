@@ -1,4 +1,5 @@
 import { type Frequency } from "@/lib/types";
+import { weeklyOccurrences } from "@/lib/weekly-schedule";
 
 // Schedule grid model (PRD §5.4, §5.5, §9). A neutral, illustrative calendar of
 // when doses are *scheduled* (forward, from the chosen regimen) and when doses
@@ -38,6 +39,12 @@ export function frequencyIntervalMs(freq: Frequency): number | null {
   return null;
 }
 
+/** Average interval for rate/summary calculations only. Named weekdays must
+ * use occurrencesInWindow for actual timestamps. */
+export function averageIntervalMs(freq: Frequency): number | null {
+  return freq.type === "weekly" ? 7 * MS_DAY / freq.days.length : frequencyIntervalMs(freq);
+}
+
 /**
  * Occurrence timestamps (ms) for a cadence within the half-open window
  * [startMs, endMs), aligned to `anchorMs` (e.g. when the chosen regimen began).
@@ -49,6 +56,7 @@ export function occurrencesInWindow(
   startMs: number,
   endMs: number
 ): number[] {
+  if (freq.type === "weekly") return weeklyOccurrences(freq, startMs, endMs);
   const interval = frequencyIntervalMs(freq);
   if (!interval || interval <= 0 || endMs <= startMs) return [];
 

@@ -1,6 +1,6 @@
 import {
   occurrencesInWindow,
-  frequencyIntervalMs,
+  averageIntervalMs,
   dayKey,
 } from "@/lib/schedule";
 import { formatDose, formatRegimenSummary, formatRoute } from "@/lib/format";
@@ -347,7 +347,7 @@ export function computeAdherence(
   }
 
   const scheduled = occurrencesInWindow(freq, anchorMs, fromMs, toMs);
-  const intervalMs = frequencyIntervalMs(freq) ?? MS_DAY;
+  const intervalMs = averageIntervalMs(freq) ?? MS_DAY;
   const tol = intervalMs / 2;
 
   if (scheduled.length === 0) {
@@ -365,13 +365,16 @@ export function computeAdherence(
   // Greedy nearest-match: each taken log can cover at most one occurrence.
   const sortedTaken = [...takenMs].sort((a, b) => a - b);
   const used = new Array(sortedTaken.length).fill(false);
-  const covered: boolean[] = scheduled.map((occ) => {
+  const covered: boolean[] = scheduled.map((occ, index) => {
+    const localTol = freq.type === "weekly"
+      ? Math.min(occ - (scheduled[index - 1] ?? occ - intervalMs), (scheduled[index + 1] ?? occ + intervalMs) - occ) / 2
+      : tol;
     let bestIdx = -1;
     let bestDist = Infinity;
     for (let i = 0; i < sortedTaken.length; i++) {
       if (used[i]) continue;
       const d = Math.abs(sortedTaken[i] - occ);
-      if (d <= tol && d < bestDist) {
+      if (d <= localTol && d < bestDist) {
         bestDist = d;
         bestIdx = i;
       }
@@ -395,7 +398,9 @@ export function computeAdherence(
     const runLen = endExclusive - runStart;
     const startDate = dayKey(scheduled[runStart]);
     const endDate = dayKey(scheduled[endExclusive - 1]);
-    const days = Math.max(1, Math.round(runLen * intervalDays));
+    const days = Math.max(1, Math.round(freq.type === "weekly"
+      ? ((scheduled[endExclusive] ?? scheduled[endExclusive - 1] + intervalMs) - scheduled[runStart]) / MS_DAY
+      : runLen * intervalDays));
     longestGapDays = Math.max(longestGapDays, days);
     if (runLen >= 2) gaps.push({ startDate, endDate, missedDoses: runLen, days });
     runStart = -1;

@@ -68,6 +68,8 @@ export interface DoseEvent {
 }
 
 export interface PrescribedRegimen {
+  /** Repeating calendar pattern, days from Monday; avoids a false even cadence. */
+  weeklyOffsets?: number[];
   perDose: number;
   /** interval between prescribed doses in days (e.g. 7/3 ≈ 2.33 for 3×/week) */
   intervalDays: number;
@@ -357,16 +359,23 @@ export function steadyStateForDrug(
 ): { trough: number; peak: number; avg: number } {
   const kern = doseKernel(drug);
   const tau = prescribed.intervalDays;
-  const span = Math.max(15 * drug.halfLifeDays, 2 * tau) + 2 * tau;
+  const period = prescribed.weeklyOffsets?.length ? 7 : tau;
+  const span = Math.ceil(Math.max(15 * drug.halfLifeDays, 2 * period) / period) * period + 2 * period;
   const doseTs: number[] = [];
-  for (let t = 0; t <= span + 1e-9; t += tau) doseTs.push(t);
+  if (prescribed.weeklyOffsets?.length) {
+    for (let week = 0; week <= span; week += 7) {
+      for (const offset of prescribed.weeklyOffsets) doseTs.push(week + offset);
+    }
+  } else {
+    for (let t = 0; t <= span + 1e-9; t += tau) doseTs.push(t);
+  }
   const amt = (t: number) =>
     doseTs.reduce((s, d) => (d <= t ? s + prescribed.perDose * kern(t - d) : s), 0);
   let mn = Infinity;
   let mx = 0;
   let sum = 0;
   let n = 0;
-  for (let t = span - tau; t <= span + 1e-9; t += 0.05) {
+  for (let t = span - period; t <= span + 1e-9; t += 0.05) {
     const v = amt(t);
     mn = Math.min(mn, v);
     mx = Math.max(mx, v);

@@ -4,7 +4,8 @@ import { sendPushNotification, type PushSubscription } from "@/lib/push";
 import { sendSms } from "@/lib/sms";
 import { escalationDedupeKey } from "@/lib/notifications";
 import { createNotification } from "@/lib/notifications-server";
-import type { Frequency } from "@/lib/types";
+import { isFrequency } from "@/lib/types";
+import { occurrencesInWindow, frequencyIntervalMs } from "@/lib/schedule";
 
 // Reminders engine (PRD §5.5, §13.12). Schedule generation, delivery, and
 // notification action handling. Never gamifies dose-taking (hard rule #14).
@@ -14,23 +15,27 @@ const MS_PER_DAY = 24 * MS_PER_HOUR;
 
 // ── Schedule generation ────────────────────────────────────────────────────
 
-/** Convert a Frequency to an interval in ms. Returns null for as_needed. */
-function frequencyToIntervalMs(freq: Frequency): number | null {
-  if (freq.type === "as_needed") return null;
-  if (freq.type === "every") {
-    const multiplier: Record<string, number> = {
-      hour: MS_PER_HOUR,
-      day: MS_PER_DAY,
-      week: MS_PER_DAY * 7,
-      month: MS_PER_DAY * 30,
-    };
-    return freq.interval * (multiplier[freq.unit] ?? MS_PER_DAY);
-  }
-  if (freq.type === "times_per") {
-    const periodMs = freq.period === "week" ? MS_PER_DAY * 7 : MS_PER_DAY;
-    return periodMs / freq.count;
-  }
-  return null;
+export class ReminderScheduleError extends Error {
+  constructor() { super("Could not refresh the reminder schedule."); this.name = "ReminderScheduleError"; }
+}
+
+/** Called only after a successful owner-authorized regimen save. Existing
+ * delivered reminders remain history; unsent ones must reflect the new plan. */
+export async function refreshMedicationReminders(medicationId: string, reset = true): Promise<void> {
+  const admin = createAdminClient();
+  const { data: schedule, error } = await admin.from("dose_schedules")
+    .select("id").eq("medication_id", medicationId).maybeSingle();
+  if (error) throw new ReminderScheduleError();
+  if (!schedule) return; // Choosing a calendar does not opt the user into notifications.
+  if (!reset) { await generateReminders(schedule.id); return; }
+  const { error: removeError } = await admin.from("dose_reminders")
+    .delete().eq("schedule_id", schedule.id).eq("status", "pending");
+  if (removeError) throw new ReminderScheduleError();
+  const now = new Date().toISOString();
+  const { error: resetError } = await admin.from("dose_schedules")
+    .update({ next_due_at: now, generated_through: now }).eq("id", schedule.id);
+  if (resetError) throw new ReminderScheduleError();
+  await generateReminders(schedule.id);
 }
 
 /**
@@ -44,35 +49,32 @@ export async function generateReminders(
   const admin = createAdminClient();
 
   // Load the schedule.
-  const { data: schedule } = await admin
+  const { data: schedule, error: scheduleError } = await admin
     .from("dose_schedules")
     .select("id, medication_id, patient_id, next_due_at, generated_through, consolidation_window_min")
     .eq("id", scheduleId)
     .single();
+  if (scheduleError) throw new ReminderScheduleError();
   if (!schedule) return 0;
 
   // Load the active chosen regimen for frequency.
-  const { data: regimen } = await admin
+  const { data: regimen, error: regimenError } = await admin
     .from("chosen_regimens")
-    .select("frequency")
+    .select("frequency, created_at")
     .eq("medication_id", schedule.medication_id)
     .eq("active", true)
     .single();
+  if (regimenError) throw new ReminderScheduleError();
   if (!regimen) return 0;
 
-  const freq = regimen.frequency as unknown as Frequency;
-  const intervalMs = frequencyToIntervalMs(freq);
-  if (!intervalMs) return 0; // as_needed — no scheduled reminders
+  const freq = regimen.frequency;
+  if (!isFrequency(freq) || freq.type === "as_needed") return 0;
 
   const now = Date.now();
   const endMs = now + lookAheadDays * MS_PER_DAY;
-  const generatedThroughMs = new Date(schedule.generated_through as string).getTime();
-
-  // Start from the later of next_due_at or generated_through.
-  let cursor = Math.max(
-    new Date(schedule.next_due_at as string).getTime(),
-    generatedThroughMs
-  );
+  // Reconcile the upcoming window against existing rows instead of trusting
+  // only the high-water mark: a failed insert/reset can be retried safely.
+  const startMs = now;
 
   // Determine recipient: the patient owner.
   const { data: membership } = await admin
@@ -81,7 +83,7 @@ export async function generateReminders(
     .eq("patient_id", schedule.patient_id)
     .eq("role", "owner")
     .single();
-  if (!membership) return 0;
+  if (!membership) throw new ReminderScheduleError();
 
   const recipientId = membership.user_id as string;
 
@@ -95,31 +97,35 @@ export async function generateReminders(
 
   const channel = pushSub ? "push" : "sms";
 
-  const rows = [];
-  while (cursor <= endMs) {
-    rows.push({
-      schedule_id: scheduleId,
-      medication_id: schedule.medication_id,
-      patient_id: schedule.patient_id,
-      due_at: new Date(cursor).toISOString(),
-      channel,
-      recipient_user_id: recipientId,
-    });
-    cursor += intervalMs;
-  }
-
+  // Use the same named-day/DST rules as the calendar and PK projections.
+  const occurrences = occurrencesInWindow(freq,
+    freq.type === "weekly" ? new Date(regimen.created_at).getTime() : new Date(schedule.next_due_at).getTime(),
+    startMs, endMs);
+  const { data: existing, error: existingError } = await admin.from("dose_reminders")
+    .select("due_at").eq("schedule_id", scheduleId)
+    .gte("due_at", new Date(startMs).toISOString()).lt("due_at", new Date(endMs).toISOString());
+  if (existingError) throw new ReminderScheduleError();
+  const already = new Set((existing ?? []).map((r) => new Date(r.due_at).getTime()));
+  const rows = occurrences.filter((ms) => !already.has(ms)).map((ms) => ({
+    schedule_id: scheduleId, medication_id: schedule.medication_id,
+    patient_id: schedule.patient_id, due_at: new Date(ms).toISOString(),
+    channel, recipient_user_id: recipientId,
+  }));
   if (rows.length > 0) {
-    await admin.from("dose_reminders").insert(rows);
+    const { error } = await admin.from("dose_reminders").insert(rows);
+    if (error) throw new ReminderScheduleError();
   }
-
-  // Update the schedule's generated_through.
-  await admin
-    .from("dose_schedules")
-    .update({
-      generated_through: new Date(endMs).toISOString(),
-      next_due_at: new Date(cursor).toISOString(),
-    })
-    .eq("id", scheduleId);
+  // Retain a real occurrence as the phase anchor for interval schedules.
+  const anchor = new Date(schedule.next_due_at).getTime();
+  const interval = frequencyIntervalMs(freq);
+  const next = interval
+    ? anchor + Math.ceil((endMs - anchor) / interval) * interval
+    : occurrencesInWindow(freq, anchor, endMs, endMs + 8 * MS_PER_DAY)[0];
+  const { error: updateError } = await admin.from("dose_schedules").update({
+    generated_through: new Date(endMs).toISOString(),
+    next_due_at: new Date(next ?? endMs).toISOString(),
+  }).eq("id", scheduleId);
+  if (updateError) throw new ReminderScheduleError();
 
   return rows.length;
 }

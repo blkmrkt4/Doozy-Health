@@ -2,23 +2,21 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createMedication } from "@/app/medications/actions";
-import { DrugSearch } from "./drug-search";
+import { DrugSearch } from "@/app/medications/new/drug-search";
+import { RegimenFields, type FrequencyInitial } from "@/app/medications/_components/regimen-fields";
+import { describePlan, weeklyTotal, readableNumber, type RegimenInput } from "@/lib/regimen-plan";
 import {
   StatusMark,
   type RowStatus,
   type CheckItem,
   type SetupStatus,
-} from "./setup-status";
+} from "@/app/medications/new/setup-status";
 import {
   DILUENTS,
   DOSE_UNITS,
   FORM_TYPES,
   FORM_TYPE_LABELS,
-  FREQUENCY_PERIODS,
-  FREQUENCY_UNITS,
   INJECTABLE_FORM_TYPES,
-  ROUTES,
-  ROUTE_LABELS,
   type FormType,
 } from "@/lib/types";
 
@@ -57,165 +55,6 @@ function Row({
   );
 }
 
-type FreqType = "every" | "times_per" | "as_needed";
-
-type FreqInit = {
-  type?: FreqType;
-  interval?: number;
-  unit?: string;
-  count?: number;
-  period?: string;
-};
-
-function FrequencyFields({
-  prefix,
-  value,
-  onChange,
-  init,
-}: {
-  prefix: string;
-  value: FreqType;
-  onChange: (v: FreqType) => void;
-  init?: FreqInit;
-}) {
-  return (
-    <div className="space-y-3">
-      <label className={labelCls}>
-        How often
-        <select
-          name={`${prefix}_type`}
-          value={value}
-          onChange={(e) => onChange(e.target.value as FreqType)}
-          className={inputCls}
-        >
-          <option value="every">Every…</option>
-          <option value="times_per">A number of times per…</option>
-          <option value="as_needed">As needed (PRN)</option>
-        </select>
-      </label>
-
-      {value === "every" ? (
-        <div className="flex gap-3">
-          <label className={`${labelCls} flex-1`}>
-            Interval
-            <input
-              type="number"
-              name={`${prefix}_interval`}
-              min={1}
-              step={1}
-              defaultValue={init?.interval ?? 1}
-              className={`${inputCls} tabular`}
-            />
-          </label>
-          <label className={`${labelCls} flex-1`}>
-            Unit
-            <select
-              name={`${prefix}_unit`}
-              defaultValue={init?.unit ?? "week"}
-              className={inputCls}
-            >
-              {FREQUENCY_UNITS.map((u) => (
-                <option key={u} value={u}>
-                  {u}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      ) : null}
-
-      {value === "times_per" ? (
-        <div className="flex gap-3">
-          <label className={`${labelCls} flex-1`}>
-            Times
-            <input
-              type="number"
-              name={`${prefix}_count`}
-              min={1}
-              step={1}
-              defaultValue={init?.count ?? 1}
-              className={`${inputCls} tabular`}
-            />
-          </label>
-          <label className={`${labelCls} flex-1`}>
-            Per
-            <select
-              name={`${prefix}_period`}
-              defaultValue={init?.period ?? "week"}
-              className={inputCls}
-            >
-              {FREQUENCY_PERIODS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function DoseFields({
-  prefix,
-  amount,
-  unit,
-}: {
-  prefix: string;
-  amount?: string;
-  unit?: string;
-}) {
-  return (
-    <div className="flex gap-3">
-      <label className={`${labelCls} flex-1`}>
-        Dose amount
-        <input
-          type="number"
-          name={`${prefix}_dose_amount`}
-          min={0}
-          step="any"
-          defaultValue={amount}
-          className={`${inputCls} tabular`}
-        />
-      </label>
-      <label className={`${labelCls} w-28`}>
-        Unit
-        <select
-          name={`${prefix}_dose_unit`}
-          defaultValue={unit ?? "mg"}
-          className={inputCls}
-        >
-          {DOSE_UNITS.map((u) => (
-            <option key={u} value={u}>
-              {u}
-            </option>
-          ))}
-        </select>
-      </label>
-    </div>
-  );
-}
-
-function RouteField({ prefix, route }: { prefix: string; route?: string }) {
-  return (
-    <label className={labelCls}>
-      Route
-      <select
-        name={`${prefix}_route`}
-        defaultValue={route ?? "oral"}
-        className={inputCls}
-      >
-        {ROUTES.map((r) => (
-          <option key={r} value={r}>
-            {ROUTE_LABELS[r]}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
 export type MedicationFormInitial = {
   drugName?: string;
   canonicalDrugId?: string;
@@ -225,7 +64,7 @@ export type MedicationFormInitial = {
     doseAmount?: string;
     doseUnit?: string;
     route?: string;
-    freq?: FreqInit;
+    freq?: FrequencyInitial;
     durationDays?: string;
     prescriberName?: string;
     directions?: string;
@@ -250,7 +89,7 @@ export type MedicationFormInitial = {
     doseAmount?: string;
     doseUnit?: string;
     route?: string;
-    freq?: FreqInit;
+    freq?: FrequencyInitial;
     reasonNote?: string;
   };
 };
@@ -258,7 +97,7 @@ export type MedicationFormInitial = {
 // Shared create/edit form (PRD §5.2.1, §5.3). In edit mode it is pre-filled
 // with the current values and posts to `updateMedication`; the prescribed
 // regimen and delivery form are versioned (new rows), the chosen regimen is
-// updated in place.
+// versioned too.
 export function MedicationForm({
   action = createMedication,
   medicationId,
@@ -279,19 +118,21 @@ export function MedicationForm({
   onStatus?: (status: SetupStatus) => void;
 } = {}) {
   const init = initial ?? {};
-  const [prescribedFreq, setPrescribedFreq] = useState<FreqType>(
-    init.prescribed?.freq?.type ?? "every"
+  const [prescription, setPrescription] = useState<RegimenInput | null>(null);
+  const [chosenPlan, setChosenPlan] = useState<RegimenInput | null>(null);
+  const [planMode, setPlanMode] = useState<"same" | "split" | "custom">(
+    init.chosen?.differs ? "custom" : "same"
   );
-  const [chosenFreq, setChosenFreq] = useState<FreqType>(
-    init.chosen?.freq?.type ?? "every"
-  );
+  const [confirmed, setConfirmed] = useState(false);
+  const [nameText, setNameText] = useState(init.drugName ?? "");
   // Default to a tablet, not a vial: most medications are oral, and defaulting
   // to an injectable form wrongly pulls in concentration + syringe (and a syringe
   // on the setup checklist) for something like aspirin.
   const [formType, setFormType] = useState<FormType>(
     init.delivery?.formType ?? "tablet"
   );
-  const [choseDiffers, setChoseDiffers] = useState(init.chosen?.differs ?? false);
+  const choseDiffers = planMode !== "same";
+  const activePlan = choseDiffers ? chosenPlan : prescription;
 
   const showSyringe = INJECTABLE_FORM_TYPES.has(formType);
 
@@ -299,8 +140,6 @@ export function MedicationForm({
   // uncontrolled). Green ticks appear as each component is filled in.
   const formRef = useRef<HTMLFormElement>(null);
   const [st, setSt] = useState({
-    name: Boolean(init.drugName),
-    prescription: Number(init.prescribed?.doseAmount ?? 0) > 0,
     label: Number(init.delivery?.concAmount ?? 0) > 0,
     syringe: Boolean(init.syringeId) || Number(init.delivery?.syringeCapacityMl ?? 0) > 0,
     isRecon: false,
@@ -312,9 +151,8 @@ export function MedicationForm({
     const fd = new FormData(f);
     const n = (k: string) => Number(fd.get(k) ?? 0);
     const v = (k: string) => String(fd.get(k) ?? "");
+    setNameText(v("drug_name"));
     setSt({
-      name: v("drug_name").trim().length > 0,
-      prescription: n("prescribed_dose_amount") > 0,
       label: n("conc_amount") > 0,
       syringe: !!v("syringe_id") || n("syringe_capacity_ml") > 0,
       isRecon: fd.get("is_reconstituted") === "on",
@@ -331,14 +169,18 @@ export function MedicationForm({
   // the prescribed regimen. Yellow ! for "works, but better info helps" (the
   // label's strength, the syringe size, a powder's mix volume). Green ✓ when
   // done, and it then goes quiet.
-  const prescriptionStatus: RowStatus = st.prescription ? "done" : "todo";
+  const prescriptionStatus: RowStatus = prescription ? "done" : "todo";
   const labelStatus: RowStatus = st.label ? "done" : "optional";
   const syringeStatus: RowStatus = st.syringe ? "done" : "optional";
   const diluentStatus: RowStatus = !st.isRecon ? "na" : st.mixVolume ? "done" : "optional";
 
   // The bottom line: do we have enough to start logging? The server requires
   // only a name + a complete prescribed regimen; everything else is optional.
-  const ready = st.name && st.prescription;
+  const ready = nameText.trim().length > 0 && !!prescription && !!activePlan;
+  const prescriptionTotal = prescription ? weeklyTotal(prescription) : null;
+  const chosenTotal = activePlan ? weeklyTotal(activePlan) : null;
+  const summary = activePlan ? describePlan(activePlan, nameText) : "Complete the amount and schedule to see your plan here.";
+  useEffect(() => setConfirmed(false), [activePlan, prescription, nameText]);
 
   // The at-a-glance list of what THIS product needs. It adapts to what we know:
   // a syringe (and a powder's mixing water) only appear once the form reads as
@@ -400,7 +242,7 @@ export function MedicationForm({
     <form
       ref={formRef}
       action={action}
-      onInput={recompute}
+      onInput={(e) => { recompute(); if ((e.target as HTMLInputElement).name !== "plan_confirmed") setConfirmed(false); }}
       onChange={recompute}
       className="space-y-3"
     >
@@ -408,11 +250,14 @@ export function MedicationForm({
         <input type="hidden" name="medication_id" value={medicationId} />
       ) : null}
 
+      <input type="hidden" name="plan_review_required" value="on" />
+      {choseDiffers && <input type="hidden" name="chosen_differs" value="on" />}
       {/* Identity — always visible (the name is the identifier). */}
       <div className="space-y-3 rounded-md border border-line p-4">
         <DrugSearch
           initialName={init.drugName}
           initialCanonicalId={init.canonicalDrugId}
+          onNameChange={setNameText}
         />
         <label className="flex items-center gap-2 text-sm text-muted">
           <input
@@ -436,23 +281,15 @@ export function MedicationForm({
       {/* Prescription */}
       <Row
         id="row-prescription"
-        title="Prescription — dose, units & schedule"
+        title="1. What does the prescription say?"
         status={prescriptionStatus}
         defaultOpen
-        hint="What the doctor wrote — the dose each time, its unit, and how often."
+        hint="Enter the amount and timing written on the prescription. Your chosen schedule comes next."
       >
-        <DoseFields
-          prefix="prescribed"
-          amount={init.prescribed?.doseAmount}
-          unit={init.prescribed?.doseUnit}
-        />
-        <RouteField prefix="prescribed" route={init.prescribed?.route} />
-        <FrequencyFields
-          prefix="prescribed_freq"
-          value={prescribedFreq}
-          onChange={setPrescribedFreq}
-          init={init.prescribed?.freq}
-        />
+        <RegimenFields prefix="prescribed" initial={init.prescribed} onPlanChange={setPrescription} />
+        <details className="rounded-md border border-line p-3">
+          <summary className="cursor-pointer text-sm text-muted">Optional prescription details</summary>
+          <div className="mt-3 space-y-3">
         <div className="flex gap-3">
           <label className={`${labelCls} flex-1`}>
             Duration (days, optional)
@@ -465,8 +302,43 @@ export function MedicationForm({
         </div>
         <label className={labelCls}>
           Directions (optional)
-          <textarea name="directions" rows={2} placeholder="e.g. Take 1 tablet by mouth every morning" defaultValue={init.prescribed?.directions} className={inputCls} />
+          <textarea name="directions" rows={2} placeholder="Copy any additional wording from the label" defaultValue={init.prescribed?.directions} className={inputCls} />
         </label>
+          </div>
+        </details>
+      </Row>
+
+      <Row title="2. How have you chosen to take it?" status={activePlan ? "done" : "todo"} defaultOpen>
+        <div className="space-y-2">
+          {([
+            ["same", "As written on the prescription"],
+            ["split", "Divide a weekly total across days I choose"],
+            ["custom", "Enter my own amount and schedule"],
+          ] as const).map(([value, text]) => <label key={value} className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-line px-3 py-2 text-sm text-paper">
+            <input type="radio" name="plan_mode" value={value} checked={planMode === value} onChange={() => { setPlanMode(value); setConfirmed(false); }} className="accent-accent" />{text}
+          </label>)}
+        </div>
+        {choseDiffers && <RegimenFields
+          key={planMode}
+          prefix="chosen"
+          split={planMode === "split"}
+          initial={planMode === "split" ? {
+            doseUnit: prescription?.dose_unit, route: prescription?.route,
+            freq: { type: "weekly", weekly_total: prescriptionTotal ?? undefined },
+          } : init.chosen?.differs ? init.chosen : {
+            doseAmount: prescription ? String(prescription.dose_amount) : undefined,
+            doseUnit: prescription?.dose_unit, route: prescription?.route, freq: prescription?.frequency,
+          }}
+          onPlanChange={setChosenPlan}
+        />}
+        {choseDiffers && prescriptionTotal != null && chosenTotal != null && <p className="text-sm text-muted">
+          {prescription?.dose_unit === activePlan?.dose_unit
+            ? Math.abs(prescriptionTotal - chosenTotal) < 1e-8
+              ? `Same weekly total: ${readableNumber(chosenTotal)} ${activePlan?.dose_unit}.`
+              : `Prescription: ${readableNumber(prescriptionTotal)} ${prescription?.dose_unit} per week. Your chosen plan: ${readableNumber(chosenTotal)} ${activePlan?.dose_unit} per week.`
+            : `Prescription and chosen plan use different units: ${prescription?.dose_unit} and ${activePlan?.dose_unit}.`}
+        </p>}
+        {choseDiffers && <label className={labelCls}>Note about your plan (optional)<input type="text" name="chosen_reason_note" defaultValue={init.chosen?.reasonNote} className={inputCls} /></label>}
       </Row>
 
       {/* Medication label — form + strength */}
@@ -602,31 +474,17 @@ export function MedicationForm({
         </Row>
       ) : null}
 
-      {/* How you take it (chosen). */}
-      <Row
-        title="How you take it"
-        status={choseDiffers ? "optional" : "na"}
-        hint="Defaults to the prescription — open only if you take it differently."
-      >
-        <label className="flex items-center gap-2 text-sm text-muted">
-          <input type="checkbox" name="chosen_differs" className="accent-accent" checked={choseDiffers} onChange={(e) => setChoseDiffers(e.target.checked)} />
-          I take this differently from the prescription
+      <section className="space-y-3 rounded-md border border-line border-l-4 border-l-accent bg-surface p-4" aria-labelledby="plan-readback-heading">
+        <h2 id="plan-readback-heading" className="text-base font-medium text-paper">Your chosen plan</h2>
+        <p aria-live="polite" className="blur-private text-lg leading-relaxed text-paper">{summary}</p>
+        <label className="flex min-h-11 items-center gap-3 text-sm text-paper">
+          <input type="checkbox" name="plan_confirmed" required disabled={!ready} checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} className="h-5 w-5 accent-accent" />
+          Yes, this describes the plan I entered.
         </label>
-        {choseDiffers ? (
-          <div className="space-y-4">
-            <DoseFields prefix="chosen" amount={init.chosen?.doseAmount} unit={init.chosen?.doseUnit} />
-            <RouteField prefix="chosen" route={init.chosen?.route} />
-            <FrequencyFields prefix="chosen_freq" value={chosenFreq} onChange={setChosenFreq} init={init.chosen?.freq} />
-            <label className={labelCls}>
-              Reason (optional)
-              <input type="text" name="chosen_reason_note" placeholder="e.g. split to flatten the curve" defaultValue={init.chosen?.reasonNote} className={inputCls} />
-            </label>
-          </div>
-        ) : null}
-      </Row>
+      </section>
 
       <div className="flex gap-3 pt-1">
-        <button type="submit" className="block flex-1 rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-on-accent transition-opacity hover:opacity-90">
+        <button type="submit" disabled={!ready || !confirmed} className="disabled:opacity-50 block flex-1 rounded-md bg-accent px-4 py-2.5 text-sm font-medium text-on-accent transition-opacity hover:opacity-90">
           {submitLabel}
         </button>
         {cancelHref ? (

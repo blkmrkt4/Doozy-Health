@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 
 // Light/dark theme switch. The actual theme is applied before paint by the
 // inline script in the root layout (no flash); this control just flips the
-// <html data-theme> attribute and remembers the choice. The header and footer
-// controls observe the same attribute so their labels always stay in sync.
+// <html data-theme> attribute and remembers the choice. Observing that attribute
+// keeps the header control's label in sync with the active theme.
 
 type Theme = "light" | "dark";
 

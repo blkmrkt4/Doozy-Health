@@ -1,3 +1,4 @@
+import { zonedDayKey } from "@/lib/weekly-schedule";
 import { occurrencesInWindow, dayKey, startOfDay, dayWindow } from "@/lib/schedule";
 import { type Frequency } from "@/lib/types";
 
@@ -77,6 +78,7 @@ export type DayLog = {
   id: string;
   medId: string;
   loggedAtMs: number;
+  calendarKey?: string;
   eventType: "taken" | "prn" | "skipped";
   amount: number | null;
   unit: string | null;
@@ -126,7 +128,11 @@ export function medDayCompliance(
   dayStartMs: number,
   dayEndMs: number
 ): MedDayCompliance {
-  const scheduled = occurrencesInWindow(
+  // Wheel cells represent calendar dates. A late-night Monday must stay on
+  // Monday even when its instant is Tuesday in the server time zone.
+  const scheduled = reg.frequency.type === "weekly"
+    ? Number(reg.frequency.days.includes(new Date(dayStartMs).getDay() || 7))
+    : occurrencesInWindow(
     reg.frequency,
     reg.anchorMs,
     dayStartMs,
@@ -184,10 +190,13 @@ export function gradeDay(
   regimens: MedRegimen[],
   takenByMed: Map<string, TakenLog[]>,
   dayStartMs: number,
-  nowMs: number
+  nowMs: number,
+  timeZone?: string
 ): DayGrade {
   const dayEndMs = addDays(dayStartMs, 1);
-  const timeClass = classifyDay(dayStartMs, nowMs);
+  const todayKey = timeZone ? zonedDayKey(nowMs, timeZone) : dayKey(nowMs);
+  const key = dayKey(dayStartMs);
+  const timeClass: DayTimeClass = key < todayKey ? "past" : key > todayKey ? "future" : "today";
 
   const perMed = regimens.map((reg) =>
     medDayCompliance(reg, takenByMed.get(reg.medicationId) ?? [], dayStartMs, dayEndMs)
@@ -239,14 +248,20 @@ export function buildWheelModel(opts: {
   takenLogs: TakenLog[];
 }): WheelModel {
   const rangeDays = opts.rangeDays ?? 50;
-  const { startMs, endMs } = dayWindow(opts.nowMs, rangeDays);
-  const todayStart = startOfDay(opts.nowMs);
+  const calendarFrequency = opts.regimens.find((r) => r.frequency.type === "weekly")?.frequency;
+  const timeZone = calendarFrequency?.type === "weekly" ? calendarFrequency.time_zone : undefined;
+  const todayKey = timeZone ? zonedDayKey(opts.nowMs, timeZone) : dayKey(opts.nowMs);
+  const [year, month, date] = todayKey.split("-").map(Number);
+  const todayStart = new Date(year, month - 1, date).getTime();
+  const { startMs, endMs } = dayWindow(todayStart, rangeDays);
+  const zoneByMed = new Map(opts.regimens.map((r) => [r.medicationId, r.frequency.type === "weekly" ? r.frequency.time_zone : undefined]));
 
   // Bucket 'taken' logs by day key, then by medication, once.
   const takenByDay = new Map<string, Map<string, TakenLog[]>>();
   for (const log of opts.takenLogs) {
-    if (log.loggedAtMs < startMs || log.loggedAtMs >= endMs) continue;
-    const k = dayKey(log.loggedAtMs);
+    if (log.loggedAtMs < startMs - MS_DAY || log.loggedAtMs >= endMs + MS_DAY) continue;
+    const zone = zoneByMed.get(log.medicationId);
+    const k = zone ? zonedDayKey(log.loggedAtMs, zone) : dayKey(log.loggedAtMs);
     let byMed = takenByDay.get(k);
     if (!byMed) {
       byMed = new Map();
@@ -262,7 +277,7 @@ export function buildWheelModel(opts: {
     const dayStart = addDays(todayStart, i);
     const k = dayKey(dayStart);
     const byMed = takenByDay.get(k) ?? new Map<string, TakenLog[]>();
-    const grade = gradeDay(opts.regimens, byMed, dayStart, opts.nowMs);
+    const grade = gradeDay(opts.regimens, byMed, dayStart, opts.nowMs, timeZone);
 
     const colourByMed = new Map(opts.regimens.map((r) => [r.medicationId, r.colour]));
     // Only meds actually scheduled that day get a dot — a med not due that day

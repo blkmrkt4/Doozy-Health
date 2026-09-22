@@ -49,7 +49,7 @@ export function DayAgenda({
         (l) =>
           l.medId === medId &&
           l.eventType === "taken" &&
-          dayKey(l.loggedAtMs) === day.key
+          (l.calendarKey ?? dayKey(l.loggedAtMs)) === day.key
       )
       .sort((a, b) => a.loggedAtMs - b.loggedAtMs)
       .map((l) => l.id);

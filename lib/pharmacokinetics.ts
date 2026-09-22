@@ -1,3 +1,5 @@
+import { isFrequency } from "@/lib/types";
+import { occurrencesInWindow } from "@/lib/schedule";
 // Deterministic pharmacokinetic engine (PRD §5.7, CLAUDE.md hard rule #8).
 // Architecture: superposition engine + per-route kernel library + linearity gate.
 // All math is TypeScript — no LLM involvement.
@@ -405,35 +407,14 @@ export function resolveParams(
  * Generate a projected dose series from a frequency schedule.
  */
 export function generateScheduledDoses(
-  frequency: { type: string; interval?: number; unit?: string; count?: number; period?: string },
+  frequency: unknown,
   doseAmount: number,
   rangeStart: number,
   rangeEnd: number
 ): DoseEvent[] {
-  let intervalMs: number;
-
-  if (frequency.type === "every" && frequency.interval && frequency.unit) {
-    const multiplier: Record<string, number> = {
-      hour: MS_PER_HOUR,
-      day: MS_PER_HOUR * 24,
-      week: MS_PER_HOUR * 24 * 7,
-      month: MS_PER_HOUR * 24 * 30,
-    };
-    intervalMs = frequency.interval * (multiplier[frequency.unit] ?? MS_PER_HOUR * 24);
-  } else if (frequency.type === "times_per" && frequency.count && frequency.period) {
-    const periodMs = frequency.period === "week"
-      ? MS_PER_HOUR * 24 * 7
-      : MS_PER_HOUR * 24;
-    intervalMs = periodMs / frequency.count;
-  } else {
-    return [];
-  }
-
-  const doses: DoseEvent[] = [];
-  for (let t = rangeStart; t <= rangeEnd; t += intervalMs) {
-    doses.push({ timestamp: t, amount: doseAmount });
-  }
-  return doses;
+  if (!isFrequency(frequency)) return [];
+  return occurrencesInWindow(frequency, rangeStart, rangeStart, rangeEnd + 1)
+    .map((timestamp) => ({ timestamp, amount: doseAmount }));
 }
 
 /**

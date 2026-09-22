@@ -22,6 +22,7 @@ const norm = (u: string | null | undefined) => (u ?? "").trim().toLowerCase();
  *  rate, so no date can be projected). */
 export function dosesPerDay(f: Frequency): number | null {
   if (f.type === "as_needed") return null;
+  if (f.type === "weekly") return f.days.length / 7;
   if (f.type === "every") {
     const perDay: Record<string, number> = { hour: 24, day: 1, week: 1 / 7, month: 1 / 30 };
     const base = perDay[f.unit];

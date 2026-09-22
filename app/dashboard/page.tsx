@@ -1,3 +1,5 @@
+import { readableNumber } from "@/lib/regimen-plan";
+import { zonedDayKey } from "@/lib/weekly-schedule";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
@@ -5,7 +7,7 @@ import { getActivePatient } from "@/lib/active-patient";
 import { archiveSyringe, setInventoryQuantity } from "@/app/inventory/actions";
 import { unarchiveMedication } from "@/app/medications/actions";
 import { MedDoseRow } from "@/app/_components/med-dose-row";
-import { dayKey, frequencyIntervalMs, occurrencesInWindow } from "@/lib/schedule";
+import { dayKey, averageIntervalMs, occurrencesInWindow } from "@/lib/schedule";
 import { acceptInvite, declineInvite } from "@/app/settings/caregivers/actions";
 import { formatRegimenSummary, relativeAge } from "@/lib/format";
 import { PatientSwitcher } from "@/app/_components/patient-switcher";
@@ -336,10 +338,14 @@ export default async function DashboardPage({
   const wheelModel = buildWheelModel({ nowMs, rangeDays: 50, regimens, takenLogs });
 
   // All logs (incl. skips/PRN) for the calendar agenda's per-day list + delete.
+  const calendarZoneByMed = new Map(regimens.map((r) => [r.medicationId, r.frequency.type === "weekly" ? r.frequency.time_zone : undefined]));
   const calendarDayLogs: DayLog[] = (logRows ?? []).map((r) => ({
     id: r.id as string,
     medId: r.medication_id,
     loggedAtMs: new Date(r.logged_at).getTime(),
+    calendarKey: calendarZoneByMed.get(r.medication_id)
+      ? zonedDayKey(new Date(r.logged_at).getTime(), calendarZoneByMed.get(r.medication_id)!)
+      : dayKey(new Date(r.logged_at).getTime()),
     eventType: r.event_type as DayLog["eventType"],
     amount: r.amount != null ? Number(r.amount) : null,
     unit: (r.unit as string | null) ?? null,
@@ -413,7 +419,7 @@ export default async function DashboardPage({
       );
       if (!params) continue; // non-linear drugs still render (the "can't model" panel)
 
-      const intervalMs = frequencyIntervalMs(chosen.frequency);
+      const intervalMs = averageIntervalMs(chosen.frequency);
       const intervalDays = intervalMs ? intervalMs / 86_400_000 : 7;
       const perDose = Number(chosen.dose_amount);
       const dayOf = (ms: number) => (ms - pkPastMs) / 86_400_000;
@@ -432,7 +438,9 @@ export default async function DashboardPage({
       ).map((ms) => ({ t: dayOf(ms), amount: perDose, taken: true }));
 
       const perPeriodDose =
-        intervalDays > 0 ? Math.round(perDose * (7 / intervalDays)) : undefined;
+        chosen.frequency.type === "weekly"
+          ? chosen.frequency.weekly_total ?? perDose * chosen.frequency.days.length
+          : intervalDays > 0 ? Math.round(perDose * (7 / intervalDays)) : undefined;
 
       const drugPk: DrugPK = {
         name: m.display_name,
@@ -455,11 +463,12 @@ export default async function DashboardPage({
       };
 
       const prescribed: PrescribedRegimen = {
+        weeklyOffsets: chosen.frequency.type === "weekly" ? chosen.frequency.days.map((d) => d - 1) : undefined,
         perDose,
         intervalDays,
         perPeriodDose,
         perPeriodLabel: perPeriodDose
-          ? `${perPeriodDose} ${chosen.dose_unit} = one week's dose (what goes in)`
+          ? `${readableNumber(perPeriodDose)} ${chosen.dose_unit} = one week's dose (what goes in)`
           : undefined,
       };
 
@@ -686,7 +695,7 @@ export default async function DashboardPage({
                       (l) =>
                         l.medId === m.id &&
                         l.eventType === "taken" &&
-                        dayKey(l.loggedAtMs) === todayD.key
+                        (l.calendarKey ?? dayKey(l.loggedAtMs)) === todayD.key
                     )
                     .sort((a, b) => a.loggedAtMs - b.loggedAtMs)
                     .map((l) => l.id)

@@ -186,7 +186,28 @@ export type MembershipRole = "owner" | "caregiver" | "viewer";
 export type Frequency =
   | { type: "every"; interval: number; unit: "hour" | "day" | "week" | "month" }
   | { type: "times_per"; count: number; period: "day" | "week" }
+  | WeeklyFrequency
   | { type: "as_needed" };
+
+/** Calendar days use ISO numbering: Monday=1 … Sunday=7. */
+export type WeeklyFrequency = {
+  type: "weekly";
+  days: number[];
+  time: string;
+  time_zone: string;
+  /** Preserve the user's total instead of reconstructing it from a rounded dose. */
+  weekly_total?: number;
+};
+
+export function isTimeZone(value: unknown): value is string {
+  if (typeof value !== "string" || !value.trim()) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format(0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export const FREQUENCY_UNITS = ["hour", "day", "week", "month"] as const;
 export const FREQUENCY_PERIODS = ["day", "week"] as const;
@@ -389,11 +410,20 @@ export function isFormType(v: unknown): v is FormType {
 export function isFrequency(v: unknown): v is Frequency {
   if (!v || typeof v !== "object") return false;
   const f = v as Record<string, unknown>;
+  if (f.type === "weekly") {
+    return Array.isArray(f.days) && f.days.length > 0 && f.days.length <= 7 &&
+      f.days.every((d) => Number.isInteger(d) && d >= 1 && d <= 7) &&
+      new Set(f.days).size === f.days.length &&
+      typeof f.time === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(f.time) &&
+      isTimeZone(f.time_zone) &&
+      (f.weekly_total === undefined ||
+        (typeof f.weekly_total === "number" && Number.isFinite(f.weekly_total) && f.weekly_total > 0));
+  }
   if (f.type === "as_needed") return true;
   if (f.type === "every") {
     return (
       typeof f.interval === "number" &&
-      f.interval > 0 &&
+      Number.isFinite(f.interval) && f.interval > 0 &&
       typeof f.unit === "string" &&
       (FREQUENCY_UNITS as readonly string[]).includes(f.unit)
     );
@@ -401,7 +431,7 @@ export function isFrequency(v: unknown): v is Frequency {
   if (f.type === "times_per") {
     return (
       typeof f.count === "number" &&
-      f.count > 0 &&
+      Number.isInteger(f.count) && f.count > 0 &&
       typeof f.period === "string" &&
       (FREQUENCY_PERIODS as readonly string[]).includes(f.period)
     );

@@ -1,3 +1,4 @@
+import { describeFrequency } from "@/lib/regimen-plan";
 import {
   ROUTE_LABELS,
   isFrequency,
@@ -20,7 +21,7 @@ export function formatDose(amount: number | string, unit: string): string {
   const n = typeof amount === "string" ? Number(amount) : amount;
   if (!Number.isFinite(n)) return `— ${unit}`;
   // Strip trailing zeros without forcing scientific notation.
-  const text = n.toString();
+  const text = new Intl.NumberFormat("en-US", { maximumFractionDigits: 4 }).format(n);
   return `${text} ${unit}`;
 }
 
@@ -28,6 +29,7 @@ export function formatDose(amount: number | string, unit: string): string {
 export function formatFrequency(freq: unknown): string {
   if (!isFrequency(freq)) return "schedule not set";
   const f = freq as Frequency;
+  if (f.type === "weekly") return describeFrequency(f);
   if (f.type === "as_needed") return "as needed";
   if (f.type === "every") {
     if (f.interval === 1) return `every ${f.unit}`;
