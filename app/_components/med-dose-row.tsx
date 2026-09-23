@@ -5,6 +5,8 @@ import { motion, useReducedMotion } from "motion/react";
 import { quickLogDose, quickUnlogDose } from "@/app/medications/actions";
 import { buildQuickLogFormData, defaultDoseText } from "@/lib/quick-log";
 import { COMPLIANCE_COLOURS } from "@/lib/colours";
+import { InjectionDoseExplanation, type InjectionExplanation } from "@/app/medications/_components/injection-dose-explanation";
+import { explainedQuantity } from "@/lib/injection-dose";
 import type { MedLogMeta } from "@/lib/adherence";
 
 // A single streamlined agenda row: medication, an editable dose, status, and a
@@ -79,6 +81,7 @@ export function MedDoseRow({
   minDots = 0,
   dotsOnly = false,
   simple = false,
+  injectionExplanation,
 }: {
   meta: MedLogMeta | undefined;
   medColour: string;
@@ -98,6 +101,7 @@ export function MedDoseRow({
   // Simple view: the dose shows as plain text; tapping it opens a small dialog
   // to change the amount. Tapping a green dot still just logs — no dialog.
   simple?: boolean;
+  injectionExplanation?: InjectionExplanation;
 }) {
   const reduce = useReducedMotion() ?? false;
   const [, startTransition] = useTransition();
@@ -111,18 +115,21 @@ export function MedDoseRow({
     setOptimistic(logged);
   }, [logged]);
 
-  // The editable dose: mL for injectables (converted to the regimen unit on
-  // log), otherwise the dose amount in its own unit.
-  const plan = meta ? defaultDoseText(meta) : { doseText: "", unitLabel: "" };
+  // The detailed explanation retains the regimen amount while showing its mL
+  // equivalent separately, so display rounding cannot change the logged dose.
+  const doseBasis = injectionExplanation ? "regimen" : "volume";
+  const plan = meta ? defaultDoseText(meta, doseBasis) : { doseText: "", unitLabel: "" };
   const [dose, setDose] = useState(plan.doseText);
   const doseUnitLabel = plan.unitLabel;
+  useEffect(() => setDose(plan.doseText), [plan.doseText]);
+  const simpleDose = simple || !!injectionExplanation;
 
   const total = Math.max(scheduled, optimistic, minDots);
   const complete = optimistic >= scheduled && scheduled > 0;
 
   function logOne() {
     if (!meta) return;
-    const fd = buildQuickLogFormData({ meta, doseText: dose, dayMs, isToday });
+    const fd = buildQuickLogFormData({ meta, doseText: dose, dayMs, isToday, doseBasis });
     if (!fd) return;
 
     setAnimIndex(optimistic);
@@ -176,6 +183,7 @@ export function MedDoseRow({
   return (
     // On phones (< sm) the name and the dose stack onto two lines; from sm up
     // they sit inline on one row. The check-dots stay centred on the right.
+    <div className="space-y-4">
     <div className="flex items-center gap-x-2 text-sm">
       <div className="flex min-w-0 flex-1 flex-col gap-y-1 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2">
         <span className="flex min-w-0 items-center gap-2">
@@ -191,7 +199,7 @@ export function MedDoseRow({
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-[18px] sm:pl-0">
           {meta ? (
             <span className="flex items-center gap-1 text-muted">
-              {canLog && !simple ? (
+              {canLog && !simpleDose ? (
                 <input
                   type="number"
                   min={0}
@@ -201,7 +209,7 @@ export function MedDoseRow({
                   aria-label="Dose"
                   className="w-14 rounded-md border border-line bg-surface px-2 py-0.5 text-sm tabular text-paper outline-none focus:border-accent"
                 />
-              ) : canLog && simple ? (
+              ) : canLog && simpleDose ? (
                 // Simple view: the amount is plain text; tapping it opens the
                 // change-amount dialog. Logging stays a one-tap dot.
                 <button
@@ -213,10 +221,10 @@ export function MedDoseRow({
                   aria-label={`Change the ${medName} amount`}
                   className="rounded-md px-1 tabular underline decoration-dotted underline-offset-4 hover:text-paper"
                 >
-                  {dose}
+                  {injectionExplanation && Number(dose) > 0 ? explainedQuantity(Number(dose), 2) : dose}
                 </button>
               ) : (
-                <span className="tabular">{dose}</span>
+                <span className="tabular">{injectionExplanation && Number(dose) > 0 ? explainedQuantity(Number(dose), 2) : dose}</span>
               )}
               <span>{doseUnitLabel}</span>
               <span className="text-faint">{meta.defaultRoute}</span>
@@ -224,7 +232,7 @@ export function MedDoseRow({
           ) : null}
 
           <span className={`text-xs ${complete ? "" : "text-faint"}`} style={complete ? { color: GREEN } : undefined}>
-            {complete ? "complete" : `${optimistic} of ${scheduled}`}
+            {injectionExplanation ? scheduled > 0 ? `${optimistic} of ${scheduled} scheduled doses logged` : `${optimistic} logged · none scheduled today` : complete ? "complete" : `${optimistic} of ${scheduled}`}
           </span>
         </span>
       </div>
@@ -288,6 +296,8 @@ export function MedDoseRow({
           </div>
         </div>
       ) : null}
+    </div>
+    {injectionExplanation && meta && <InjectionDoseExplanation meta={meta} amount={Number(dose)} details={injectionExplanation} />}
     </div>
   );
 }

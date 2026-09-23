@@ -42,11 +42,11 @@ export function mlPrecision(meta: MedLogMeta): number {
  * injectables (converted back to the regimen unit on log), otherwise the
  * chosen-regimen amount in its own unit.
  */
-export function defaultDoseText(meta: MedLogMeta): {
+export function defaultDoseText(meta: MedLogMeta, doseBasis: "volume" | "regimen" = "volume"): {
   doseText: string;
   unitLabel: string;
 } {
-  if (canDrawWithSyringe(meta)) {
+  if (doseBasis === "volume" && canDrawWithSyringe(meta)) {
     return {
       doseText: doseToVolumeMl(
         meta.defaultAmount,
@@ -68,11 +68,12 @@ export function buildQuickLogFormData(opts: {
   doseText: string;
   dayMs: number;
   isToday: boolean;
+  doseBasis?: "volume" | "regimen";
 }): FormData | null {
   const { meta, doseText, dayMs, isToday } = opts;
   const n = Number(doseText);
   if (!Number.isFinite(n) || n <= 0) return null;
-  const syringe = canDrawWithSyringe(meta);
+  const syringe = opts.doseBasis !== "regimen" && canDrawWithSyringe(meta);
   const amount = syringe ? n * amountPerMl(meta) : n;
   if (!Number.isFinite(amount) || amount <= 0) return null;
 

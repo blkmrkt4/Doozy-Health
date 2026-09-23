@@ -63,7 +63,6 @@ import {
   SIGNED_URL_TTL_SECONDS,
 } from "@/lib/documents";
 import { LogDoseForm } from "./log-dose-form";
-import { SyringeVisual } from "@/app/medications/_components/syringe-visual";
 import { buildSetupChecklist } from "@/lib/medication-setup";
 import { SetupChecklist } from "@/app/medications/[id]/_components/setup-checklist";
 import { RegimenHistory } from "@/app/medications/[id]/_components/regimen-history";
@@ -703,18 +702,13 @@ export default async function MedicationDetailPage({
               isToday={true}
               canLog={canLog}
               minDots={1}
+              injectionExplanation={isInjectable && delivery?.concentration ? {
+                concentrationUnit: delivery.concentration.unit,
+                frequency: isFrequency(chosen.frequency) ? chosen.frequency : null,
+                syringeUnitMarkings: linkedSyringeCapacityMl != null ? linkedSyringeMarkings : delivery?.syringe_spec?.unit_markings,
+              } : undefined}
             />
             <div className="flex flex-wrap items-center gap-3">
-              {/* Calibrated syringe visual for injectables (PRD §4.3, §9) */}
-              {isInjectable && delivery?.concentration && delivery.concentration.amount ? (
-                <SyringeVisual
-                  doseAmount={Number(chosen.dose_amount)}
-                  concentrationAmount={delivery.concentration.amount}
-                  concentrationPerVolume={delivery.concentration.per_volume ?? 1}
-                  syringeCapacityMl={resolvedCapacityMl ?? 0}
-                  syringeUnitMarkings={linkedSyringeCapacityMl != null ? linkedSyringeMarkings : delivery?.syringe_spec?.unit_markings}
-                />
-              ) : null}
               <LogDoseForm
                 medicationId={med.id}
                 defaultAmount={String(chosen.dose_amount)}

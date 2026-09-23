@@ -27,12 +27,14 @@ export function SyringeVisual({
   concentrationPerVolume,
   syringeCapacityMl,
   syringeUnitMarkings,
+  showVolumeCaption = true,
 }: {
   doseAmount: number;
   concentrationAmount: number;
   concentrationPerVolume: number;
   syringeCapacityMl: number;
   syringeUnitMarkings?: string;
+  showVolumeCaption?: boolean;
 }) {
   if (
     !Number.isFinite(doseAmount) ||
@@ -123,10 +125,10 @@ export function SyringeVisual({
         ))}
       </svg>
 
-      <p className="tabular text-sm text-paper">
+      {showVolumeCaption && <p className="tabular text-sm text-paper">
         {Number(volumeMl.toPrecision(6))} mL
         <span className="ml-2 text-xs text-faint">Calculated volume from the entered dose and concentration</span>
-      </p>
+      </p>}
       {!step && <p className="text-xs text-faint">Volume illustration only. Syringe markings have not been entered.</p>}
     </div>
   );
