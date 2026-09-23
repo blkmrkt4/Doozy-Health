@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createMedication } from "@/app/medications/actions";
 import { DrugSearch } from "@/app/medications/new/drug-search";
+import { DeliveryLabelFields } from "@/app/medications/_components/delivery-label-fields";
 import { RegimenFields, type FrequencyInitial } from "@/app/medications/_components/regimen-fields";
 import { describePlan, weeklyTotal, readableNumber, type RegimenInput } from "@/lib/regimen-plan";
 import {
@@ -13,7 +14,6 @@ import {
 } from "@/app/medications/new/setup-status";
 import {
   DILUENTS,
-  DOSE_UNITS,
   FORM_TYPES,
   FORM_TYPE_LABELS,
   INJECTABLE_FORM_TYPES,
@@ -360,41 +360,11 @@ export function MedicationForm({
             {FORM_TYPES.map((f) => (<option key={f} value={f}>{FORM_TYPE_LABELS[f]}</option>))}
           </select>
         </label>
-        <div className="space-y-2">
-          <p className="text-xs text-faint">
-            {showSyringe
-              ? "Concentration — or, for a powder, the active amount in the vial"
-              : "Strength (optional)"}
-          </p>
-          <div className="flex items-end gap-2">
-            <label className={`${labelCls} flex-1`}>
-              Amount
-              <input type="number" name="conc_amount" min={0} step="any" defaultValue={init.delivery?.concAmount} className={`${inputCls} tabular`} />
-            </label>
-            <label className={`${labelCls} w-24`}>
-              Unit
-              <select name="conc_unit" defaultValue={init.delivery?.concUnit ?? "mg"} className={inputCls}>
-                {DOSE_UNITS.map((u) => (<option key={u} value={u}>{u}</option>))}
-              </select>
-            </label>
-            <span className="pb-2 text-sm text-faint">per</span>
-            <label className={`${labelCls} w-20`}>
-              Volume
-              <input type="number" name="conc_per_volume" min={0} step="any" defaultValue={init.delivery?.concPerVolume ?? 1} className={`${inputCls} tabular`} />
-            </label>
-            <span className="pb-2 text-sm text-faint">mL</span>
-          </div>
-        </div>
-        <div className="flex gap-3">
-          <label className={`${labelCls} flex-1`}>
-            Pack count (optional)
-            <input type="number" name="package_count" min={0} step="any" defaultValue={init.delivery?.packageCount} className={`${inputCls} tabular`} />
-          </label>
-          <label className={`${labelCls} flex-1`}>
-            Pack unit (optional)
-            <input type="text" name="package_unit" placeholder="e.g. tablets, mL" defaultValue={init.delivery?.packageUnit} className={inputCls} />
-          </label>
-        </div>
+        <DeliveryLabelFields
+          formType={formType}
+          initial={init.delivery}
+          onQuantityChange={() => setConfirmed(false)}
+        />
         <div className="flex gap-3">
           <label className={`${labelCls} flex-1`}>
             Expiry (optional)
@@ -424,9 +394,9 @@ export function MedicationForm({
             <span>This vial is a powder I mix before use</span>
           </label>
           <p className="text-xs text-faint">
-            Put the active amount in the vial in <span className="text-muted">Amount</span>{" "}
+            Put the active amount in the vial in <span className="text-muted">Amount on the label</span>{" "}
             under &ldquo;Medication label&rdquo;, and the volume your prescription says to
-            add in <span className="text-muted">Volume</span> — the concentration is
+            add in <span className="text-muted">Per how many mL?</span> — the concentration is
             amount ÷ volume. The mix volume comes from your prescription, not from us.
           </p>
           <label className={labelCls}>
