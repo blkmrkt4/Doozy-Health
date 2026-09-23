@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SyringeFields } from "@/app/_components/syringe-fields";
 import Image from "next/image";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
@@ -96,26 +97,7 @@ export default async function SyringeExtractReviewPage({
               A friendly name. Optional — we will name it from the spec if blank.
             </span>
           </label>
-          <div className="flex gap-3">
-            <label className={`${labelCls} flex-1`}>
-              Capacity (mL)
-              <input type="number" name="capacity_ml" min={0} step="any" defaultValue={val(ex.capacity_ml)} className={`${inputCls} tabular`} />
-            </label>
-            <label className={`${labelCls} flex-1`}>
-              Needle gauge
-              <input type="number" name="needle_gauge" min={0} step={1} defaultValue={val(ex.needle_gauge)} className={`${inputCls} tabular`} />
-            </label>
-          </div>
-          <div className="flex gap-3">
-            <label className={`${labelCls} flex-1`}>
-              Needle length (in)
-              <input type="number" name="needle_length_in" min={0} step="any" defaultValue={val(ex.needle_length_in)} className={`${inputCls} tabular`} />
-            </label>
-            <label className={`${labelCls} flex-1`}>
-              Unit markings
-              <input type="text" name="unit_markings" defaultValue={val(ex.unit_markings)} className={inputCls} />
-            </label>
-          </div>
+          <SyringeFields initial={{ capacity: val(ex.capacity_ml), gauge: val(ex.needle_gauge), lengthIn: val(ex.needle_length_in), markings: val(ex.unit_markings) }} />
           <div className="flex gap-3">
             <label className={`${labelCls} flex-1`}>
               Manufacturer

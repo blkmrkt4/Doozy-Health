@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { SyringeFields } from "@/app/_components/syringe-fields";
+import { parseSyringeCapacity } from "@/lib/syringe-measurements";
 import { createMedication } from "@/app/medications/actions";
 import { DrugSearch } from "@/app/medications/new/drug-search";
 import { DeliveryLabelFields } from "@/app/medications/_components/delivery-label-fields";
@@ -154,7 +156,7 @@ export function MedicationForm({
     setNameText(v("drug_name"));
     setSt({
       label: n("conc_amount") > 0,
-      syringe: !!v("syringe_id") || n("syringe_capacity_ml") > 0,
+      syringe: !!v("syringe_id") || parseSyringeCapacity(v("syringe_capacity_ml")) != null,
       isRecon: fd.get("is_reconstituted") === "on",
       mixVolume: n("conc_per_volume") > 0,
     });
@@ -427,26 +429,11 @@ export function MedicationForm({
               <a href="/inventory/new" className="text-accent hover:underline">Add a syringe</a>.
             </span>
           </label>
-          <div className="flex gap-3">
-            <label className={`${labelCls} flex-1`}>
-              Capacity (mL)
-              <input type="number" name="syringe_capacity_ml" min={0} step="any" defaultValue={init.delivery?.syringeCapacityMl} className={`${inputCls} tabular`} />
-            </label>
-            <label className={`${labelCls} flex-1`}>
-              Needle gauge
-              <input type="number" name="syringe_needle_gauge" min={0} step={1} defaultValue={init.delivery?.syringeNeedleGauge} className={`${inputCls} tabular`} />
-            </label>
-          </div>
-          <div className="flex gap-3">
-            <label className={`${labelCls} flex-1`}>
-              Needle length (in)
-              <input type="number" name="syringe_needle_length_in" min={0} step="any" defaultValue={init.delivery?.syringeNeedleLengthIn} className={`${inputCls} tabular`} />
-            </label>
-            <label className={`${labelCls} flex-1`}>
-              Unit markings
-              <input type="text" name="syringe_unit_markings" placeholder="e.g. 0.1 mL" defaultValue={init.delivery?.syringeUnitMarkings} className={inputCls} />
-            </label>
-          </div>
+          <SyringeFields
+            prefix="syringe_"
+            requireCapacityForDetails
+            initial={{ capacity: init.delivery?.syringeCapacityMl, gauge: init.delivery?.syringeNeedleGauge, lengthIn: init.delivery?.syringeNeedleLengthIn, markings: init.delivery?.syringeUnitMarkings }}
+          />
         </Row>
       ) : null}
 

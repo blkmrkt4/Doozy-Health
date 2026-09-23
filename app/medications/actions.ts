@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { readSyringeMeasurements } from "@/lib/syringe-measurements";
 import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
@@ -185,17 +186,16 @@ export async function createMedication(formData: FormData) {
   // carries the working numbers; this records the provenance for display.
   const reconstitution = buildReconstitution(formData, concentration);
 
-  // Optional syringe spec (injectables only; the form hides it otherwise).
-  let syringeSpec: SyringeSpec | undefined;
-  const capacity = Number(str(formData, "syringe_capacity_ml"));
-  if (str(formData, "syringe_capacity_ml") !== "" && Number.isFinite(capacity)) {
-    syringeSpec = {
-      capacity_mL: capacity,
-      needle_gauge: Number(str(formData, "syringe_needle_gauge")) || 0,
-      needle_length_in: Number(str(formData, "syringe_needle_length_in")) || 0,
-      unit_markings: str(formData, "syringe_unit_markings"),
-    };
-  }
+  // Normalize package measurements before saving the existing syringe spec.
+  const syringeMeasurements = readSyringeMeasurements(formData, "syringe_", true);
+  const syringeError = Object.values(syringeMeasurements.errors)[0];
+  if (syringeError) failNew(syringeError);
+  const syringeSpec: SyringeSpec | undefined = syringeMeasurements.spec.capacity_mL != null ? {
+    capacity_mL: syringeMeasurements.spec.capacity_mL,
+    needle_gauge: syringeMeasurements.spec.needle_gauge ?? 0,
+    needle_length_in: syringeMeasurements.spec.needle_length_in ?? 0,
+    unit_markings: syringeMeasurements.spec.unit_markings ?? "",
+  } : undefined;
 
   // Chosen regimen: defaults to the prescribed regimen unless the user marks
   // that they take it differently (PRD §5.3).
@@ -334,17 +334,16 @@ export async function updateMedication(formData: FormData) {
     };
   }
 
-  // Optional syringe spec (injectables only).
-  let syringeSpec: SyringeSpec | null = null;
-  const capacity = Number(str(formData, "syringe_capacity_ml"));
-  if (str(formData, "syringe_capacity_ml") !== "" && Number.isFinite(capacity)) {
-    syringeSpec = {
-      capacity_mL: capacity,
-      needle_gauge: Number(str(formData, "syringe_needle_gauge")) || 0,
-      needle_length_in: Number(str(formData, "syringe_needle_length_in")) || 0,
-      unit_markings: str(formData, "syringe_unit_markings"),
-    };
-  }
+  // Normalize package measurements before saving the existing syringe spec.
+  const syringeMeasurements = readSyringeMeasurements(formData, "syringe_", true);
+  const syringeError = Object.values(syringeMeasurements.errors)[0];
+  if (syringeError) failEdit(syringeError);
+  const syringeSpec: SyringeSpec | null = syringeMeasurements.spec.capacity_mL != null ? {
+    capacity_mL: syringeMeasurements.spec.capacity_mL,
+    needle_gauge: syringeMeasurements.spec.needle_gauge ?? 0,
+    needle_length_in: syringeMeasurements.spec.needle_length_in ?? 0,
+    unit_markings: syringeMeasurements.spec.unit_markings ?? "",
+  } : null;
 
   if (formData.get("plan_review_required") === "on" && formData.get("plan_confirmed") !== "on") {
     failEdit("Confirm that the plan describes what you entered.");

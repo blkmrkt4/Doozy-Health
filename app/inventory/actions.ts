@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { formatNeedleLength, readSyringeMeasurements } from "@/lib/syringe-measurements";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -29,22 +30,10 @@ function failNewSyringe(message: string): never {
 }
 
 /** Build the spec jsonb from confirmed/manual fields. */
-function buildSpec(formData: FormData): Record<string, unknown> {
-  const spec: Record<string, unknown> = {};
-  const cap = Number(str(formData, "capacity_ml"));
-  if (str(formData, "capacity_ml") && Number.isFinite(cap) && cap > 0) {
-    spec.capacity_mL = cap;
-  }
-  const gauge = Number(str(formData, "needle_gauge"));
-  if (str(formData, "needle_gauge") && Number.isFinite(gauge) && gauge > 0) {
-    spec.needle_gauge = gauge;
-  }
-  const len = Number(str(formData, "needle_length_in"));
-  if (str(formData, "needle_length_in") && Number.isFinite(len) && len > 0) {
-    spec.needle_length_in = len;
-  }
-  const markings = str(formData, "unit_markings");
-  if (markings) spec.unit_markings = markings;
+function buildSpec(formData: FormData, fail: (message: string) => never = failNewSyringe): Record<string, unknown> {
+  const { spec, errors } = readSyringeMeasurements(formData);
+  const error = Object.values(errors)[0];
+  if (error) fail(error);
   return spec;
 }
 
@@ -52,6 +41,7 @@ function defaultLabel(spec: Record<string, unknown>): string {
   const parts: string[] = [];
   if (spec.capacity_mL) parts.push(`${spec.capacity_mL} mL`);
   if (spec.needle_gauge) parts.push(`${spec.needle_gauge}G`);
+  if (typeof spec.needle_length_in === "number") parts.push(formatNeedleLength(spec.needle_length_in));
   return parts.length ? `${parts.join(" · ")} syringe` : "Syringe";
 }
 
@@ -158,7 +148,9 @@ export async function confirmSyringeExtraction(formData: FormData) {
   const { supabase, active } = await requireOwner();
   const docId = str(formData, "document_id");
 
-  const spec = buildSpec(formData);
+  const spec = buildSpec(formData, (message) => redirect(
+    `/inventory/new/extract?doc=${encodeURIComponent(docId)}&error=${encodeURIComponent(message)}`
+  ));
   const label = str(formData, "label") || defaultLabel(spec);
 
   const quantity = parseQuantity(formData);
@@ -212,9 +204,9 @@ export async function confirmSyringeExtraction(formData: FormData) {
         drugCanonicalName: "syringe",
         extraction,
         userValues: {
-          capacity_ml: str(formData, "capacity_ml"),
-          needle_gauge: str(formData, "needle_gauge"),
-          needle_length_in: str(formData, "needle_length_in"),
+          capacity_ml: spec.capacity_mL == null ? "" : String(spec.capacity_mL),
+          needle_gauge: spec.needle_gauge == null ? "" : String(spec.needle_gauge),
+          needle_length_in: spec.needle_length_in == null ? "" : String(spec.needle_length_in),
           unit_markings: str(formData, "unit_markings"),
           manufacturer: str(formData, "manufacturer"),
           batch: str(formData, "batch"),

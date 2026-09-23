@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SyringeFields } from "@/app/_components/syringe-fields";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getActivePatient } from "@/lib/active-patient";
@@ -63,26 +64,7 @@ export default async function NewSyringePage({
               will name it from the spec if you leave it blank.
             </span>
           </label>
-          <div className="flex gap-3">
-            <label className={`${labelCls} flex-1`}>
-              Capacity (mL)
-              <input type="number" name="capacity_ml" min={0} step="any" className={`${inputCls} tabular`} />
-            </label>
-            <label className={`${labelCls} flex-1`}>
-              Needle gauge
-              <input type="number" name="needle_gauge" min={0} step={1} className={`${inputCls} tabular`} />
-            </label>
-          </div>
-          <div className="flex gap-3">
-            <label className={`${labelCls} flex-1`}>
-              Needle length (in)
-              <input type="number" name="needle_length_in" min={0} step="any" className={`${inputCls} tabular`} />
-            </label>
-            <label className={`${labelCls} flex-1`}>
-              Unit markings
-              <input type="text" name="unit_markings" placeholder="e.g. 0.01 mL increments" className={inputCls} />
-            </label>
-          </div>
+          <SyringeFields />
           <label className={labelCls}>
             How many do you have?
             <input type="number" name="quantity" min={0} step={1} inputMode="numeric" className={`${inputCls} tabular`} />
