@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { Inter_Tight, JetBrains_Mono } from "next/font/google";
 import "../landing.css";
@@ -36,7 +37,7 @@ export function LandingHero({
       <Link href={ctaHref} className="wk-hero-link" aria-label={ctaLabel}>
         <div className="wk-main">
           <div className="wk-eyebrow">
-            A ByZyB product&nbsp;&nbsp;·&nbsp;&nbsp;<b>wellkept.care</b>
+            A Painkiller Labs project&nbsp;&nbsp;·&nbsp;&nbsp;<b>wellkept.care</b>
           </div>
           <h1 className="wk-wordmark">
             WellKept<span className="wk-dot">.</span>
@@ -80,7 +81,17 @@ export function LandingHero({
       </svg>
 
       <div className="wk-byline">
-        <a href="https://byzyb.ai">byzyb.ai</a>
+        <a href="https://pklabs.ca" aria-label="Painkiller Labs — pklabs.ca">
+          <Image
+            src="/brand/painkiller-labs-embossed.png"
+            alt="Painkiller Labs"
+            width={80}
+            height={80}
+            sizes="80px"
+            className="wk-project-logo"
+          />
+          <span>pklabs.ca</span>
+        </a>
       </div>
     </div>
   );

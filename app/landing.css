@@ -185,7 +185,7 @@
   stroke-width: 1.6;
 }
 
-/* byzyb credit, kept inside the landing (not a viewport-fixed footer, so it
+/* Project credit, kept inside the landing (not a viewport-fixed footer, so it
    never collides with the app's required disclaimer footer below) */
 .wk-byline {
   position: absolute;
@@ -203,13 +203,26 @@
   animation: wk-rise 0.9s 1s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
 }
 .wk-byline a {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   color: var(--wk-muted-2);
   text-decoration: none;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+}
+.wk-byline a span {
+  border-bottom: 1px solid var(--color-line);
   padding-bottom: 1px;
+}
+.wk-project-logo {
+  width: 80px;
+  height: 80px;
+  flex-shrink: 0;
+  object-fit: contain;
 }
 .wk-byline a:hover {
   color: var(--wk-accent);
+}
+.wk-byline a:hover span {
   border-color: var(--wk-accent);
 }
 
