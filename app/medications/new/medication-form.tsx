@@ -378,6 +378,7 @@ export function MedicationForm({
         <DeliveryLabelFields
           formType={formType}
           initial={init.delivery}
+          chosenPlan={activePlan}
           onQuantityChange={() => setConfirmed(false)}
         />
         <div className="flex gap-3">

@@ -1,4 +1,5 @@
 import type { Frequency } from "@/lib/types";
+import { convertDose } from "@/lib/units";
 
 // Supply / run-out projection (PRD §5.3). Deterministic TypeScript, no LLM:
 // given how much is in the package, the chosen cadence, and what's actually been
@@ -17,6 +18,37 @@ const COUNT_UNITS = new Set([
   "tablet", "tablets", "capsule", "capsules", "pill", "pills",
 ]);
 const norm = (u: string | null | undefined) => (u ?? "").trim().toLowerCase();
+
+/** Setup readback for a full vial at the user's chosen plan (PRD §5.3/§5.11).
+ * Duration uses the entered period, without rounding dose amounts or implying
+ * that a partial remainder is another full dose. */
+export function vialSupplyEstimate(volumeMl: number, conc: Conc, plan: {
+  dose_amount: number; dose_unit: string; frequency: Frequency;
+}) {
+  if (!conc || norm(conc.volume_unit) !== "ml" ||
+      ![volumeMl, conc.amount, conc.per_volume, plan.dose_amount].every((n) => Number.isFinite(n) && n > 0)) return null;
+  let dose = plan.dose_amount;
+  let perDoseMl: number | null;
+  if (norm(plan.dose_unit) === "ml") perDoseMl = dose;
+  else {
+    if (norm(plan.dose_unit) !== norm(conc.unit)) {
+      const massUnits = ["mg", "mcg", "g", "grain"];
+      if (!massUnits.includes(plan.dose_unit) || !massUnits.includes(conc.unit)) return null;
+      dose = convertDose(dose, plan.dose_unit, conc.unit)!;
+    }
+    perDoseMl = dose * conc.per_volume / conc.amount;
+  }
+  const doses = volumeMl / perDoseMl;
+  if (!Number.isFinite(doses) || doses <= 0) return null;
+  // Floating-point division may leave a tiny remainder at an exact dose count.
+  const nearest = Math.round(doses);
+  const exact = nearest > 0 && Math.abs(doses - nearest) <= 1e-10 * Math.max(1, doses);
+  const fullDoses = exact ? nearest : Math.floor(doses);
+  const f = plan.frequency;
+  const period = f.type === "weekly" ? "week" : f.type === "times_per" ? f.period : f.type === "every" ? f.unit : null;
+  const duration = f.type === "weekly" ? doses / f.days.length : f.type === "times_per" ? doses / f.count : f.type === "every" ? doses * f.interval : null;
+  return { fullDoses, hasRemainder: !exact, duration, period };
+}
 
 /** Doses per day implied by a structured cadence; null for as-needed (no steady
  *  rate, so no date can be projected). */

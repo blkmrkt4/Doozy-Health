@@ -110,11 +110,11 @@ export function RegimenFields({ prefix, initial = {}, split = false, onPlanChang
       <div className="flex flex-wrap gap-2">{WEEKDAYS.map((day, i) => <button key={day} type="button" aria-label={day} aria-pressed={days.includes(i + 1)} onClick={() => setDays((current) => current.includes(i + 1) ? current.filter((d) => d !== i + 1) : [...current, i + 1].sort((a, b) => a - b))} className={`min-h-11 min-w-11 rounded-md border px-3 text-sm ${days.includes(i + 1) ? "border-accent bg-accent-surface text-accent" : "border-line bg-surface text-paper"}`}>{day.slice(0, 3)}</button>)}</div>
       <button type="button" onClick={() => setDays([1, 2, 3, 4, 5, 6, 7])} className="min-h-11 text-sm text-paper underline">Every day</button>
       <p className="text-sm text-muted">{days.length ? `${days.length} ${days.length === 1 ? "dose" : "doses"} per week · one on each selected day` : "Choose at least one day."}</p>
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center gap-3">
         <span className="text-sm text-muted">Time on these days</span>
         <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-paper">
           <input type="checkbox" checked={noTime} onChange={(e) => { setNoTime(e.target.checked); if (e.target.checked) setZone(Intl.DateTimeFormat().resolvedOptions().timeZone); }} className="accent-accent" />
-          N/A — no set time
+          N/A
         </label>
       </div>
       {!noTime && <div className="grid gap-3 sm:grid-cols-2">

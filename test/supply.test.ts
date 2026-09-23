@@ -5,10 +5,33 @@ import {
   consumedFromLogs,
   projectRunOut,
   formatRunOut,
+  vialSupplyEstimate,
 } from "@/lib/supply";
 
 const DAY = 86_400_000;
 const NOW = 1_700_000_000_000; // fixed instant for deterministic dates
+
+describe("vial setup supply estimate", () => {
+  const conc = { amount: 200, unit: "mg", per_volume: 1, volume_unit: "mL" };
+  const plan = { dose_amount: 60, dose_unit: "mg", frequency: { type: "times_per" as const, count: 3, period: "week" as const } };
+  it("calculates dose count and the chosen period without rounding up full doses", () => {
+    expect(vialSupplyEstimate(5, conc, plan)).toEqual({ fullDoses: 16, hasRemainder: true, duration: 1000 / 60 / 3, period: "week" });
+    expect(vialSupplyEstimate(5, { ...conc, amount: 1000, per_volume: 5 }, plan)).toEqual(vialSupplyEstimate(5, conc, plan));
+  });
+  it("reconciles volume doses and compatible mass units, but never assumes an IU conversion", () => {
+    expect(vialSupplyEstimate(5, conc, { ...plan, dose_amount: 0.3, dose_unit: "mL" })).toEqual(vialSupplyEstimate(5, conc, plan));
+    expect(vialSupplyEstimate(5, conc, { ...plan, dose_amount: 60000, dose_unit: "mcg" })).toEqual(vialSupplyEstimate(5, conc, plan));
+    expect(vialSupplyEstimate(5, conc, { ...plan, dose_unit: "IU" })).toBeNull();
+  });
+  it("does not project a duration for as-needed plans", () => {
+    expect(vialSupplyEstimate(5, conc, { ...plan, frequency: { type: "as_needed" } })).toMatchObject({ fullDoses: 16, duration: null, period: null });
+  });
+  it("handles a vial smaller than a dose and missing or invalid volume", () => {
+    expect(vialSupplyEstimate(0.1, conc, plan)).toMatchObject({ fullDoses: 0, hasRemainder: true });
+    expect(vialSupplyEstimate(0, conc, plan)).toBeNull();
+    expect(vialSupplyEstimate(5, { ...conc, amount: Infinity }, plan)).toBeNull();
+  });
+});
 
 describe("dosesPerDay", () => {
   it("handles every-N-unit", () => {

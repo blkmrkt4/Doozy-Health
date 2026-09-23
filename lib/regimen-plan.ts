@@ -98,7 +98,7 @@ export function regimenInputIssue(fd: FormData, prefix: string): string | null {
   if (!Number.isFinite(amount) || amount <= 0) return total ? "Enter the total for the week." : "Enter the amount each time.";
   if (value("freq_type") === "weekly") {
     if (!fd.getAll(`${prefix}_freq_days`).length) return "Choose at least one day of the week.";
-    if (value("freq_time_unspecified") !== "on" && !value("freq_time")) return "Choose a time, or select N/A — no set time.";
+    if (value("freq_time_unspecified") !== "on" && !value("freq_time")) return "Choose a time, or select N/A.";
     if (!isTimeZone(value("freq_time_zone"))) return "Enter a valid time zone.";
   }
   return "Check the amount, units, route, and schedule.";

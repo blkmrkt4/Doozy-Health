@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { DOSE_UNITS, type FormType } from "@/lib/types";
+import type { RegimenInput } from "@/lib/regimen-plan";
+import { vialSupplyEstimate } from "@/lib/supply";
 
 type LabelInitial = {
   formType?: FormType;
@@ -22,10 +24,11 @@ function quantity(value: number): string {
 
 /** Vial volume still posts in the existing package fields (PRD §5.3). Keep it
  * separate from the volume printed in the concentration, which may be 1 mL. */
-export function DeliveryLabelFields({ formType, initial = {}, onQuantityChange }: {
+export function DeliveryLabelFields({ formType, initial = {}, onQuantityChange, chosenPlan }: {
   formType: FormType;
   initial?: LabelInitial;
   onQuantityChange: () => void;
+  chosenPlan?: RegimenInput | null;
 }) {
   const isVial = formType === "vial";
   const initialIsVolume = initial.packageUnit?.trim().toLowerCase() === "ml";
@@ -44,6 +47,15 @@ export function DeliveryLabelFields({ formType, initial = {}, onQuantityChange }
   const validConcentration = Number(amount) > 0 && Number(perVolume) > 0 && Number.isFinite(perMl);
   const vialTotal = perMl * Number(volume);
   const validVolume = Number(volume) > 0 && Number.isFinite(vialTotal);
+  const supply = useVialVolume && validVolume && validConcentration && chosenPlan
+    ? vialSupplyEstimate(Number(volume), { amount: Number(amount), unit, per_volume: Number(perVolume), volume_unit: "mL" }, chosenPlan)
+    : null;
+  const doseCount = supply ? supply.fullDoses === 0 ? "part of one dose"
+    : `${supply.fullDoses.toLocaleString("en-US")} full ${supply.fullDoses === 1 ? "dose" : "doses"}${supply.hasRemainder ? ", with some left over" : ""}` : "";
+  const durationNumber = supply?.duration?.toLocaleString("en-US", supply.duration < 0.1 ? { maximumSignificantDigits: 2 } : { maximumFractionDigits: 1 });
+  const durationText = durationNumber && supply?.period
+    ? ` — about ${durationNumber} ${supply.period}${durationNumber === "1" ? "" : "s"} at your chosen schedule`
+    : "";
 
   return <>
     <div className="space-y-2">
@@ -92,6 +104,7 @@ export function DeliveryLabelFields({ formType, initial = {}, onQuantityChange }
     {isVial && validConcentration && <p aria-live="polite" className="rounded-md border border-line bg-surface p-3 text-sm leading-relaxed text-paper">
       Each 1 mL contains {quantity(perMl)} {unit}.
       {useVialVolume && validVolume ? ` This ${quantity(Number(volume))} mL vial contains ${quantity(vialTotal)} ${unit} in total.` : ""}
+      {supply ? ` That is enough for ${doseCount}${durationText}.` : ""}
     </p>}
   </>;
 }
