@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describePlan, parsePlanFrequency, readRegimenInput, readableTime, weeklyTotal } from "@/lib/regimen-plan";
+import { describePlan, parsePlanFrequency, readRegimenInput, readableTime, weeklyTotal, regimenInputIssue } from "@/lib/regimen-plan";
 import { isFrequency, type WeeklyFrequency } from "@/lib/types";
 import { occurrencesInWindow, frequencyIntervalMs } from "@/lib/schedule";
 import { generateScheduledDoses } from "@/lib/pharmacokinetics";
@@ -116,5 +116,35 @@ describe("calendar and report integration", () => {
     const scheduled = occurrencesInWindow(weekly, start, start, end);
     const report = computeAdherence(weekly, start, start, end, scheduled, 0);
     expect(report.scheduledCount).toBe(3); expect(report.coveredCount).toBe(3);
+  });
+});
+
+
+describe("weekly plans with no set time", () => {
+  it("requires either a chosen time or an explicit N/A choice", () => {
+    const fd = form([1, 4, 6], "180");
+    fd.set("chosen_freq_time", "");
+    expect(readRegimenInput(fd, "chosen")).toBeNull();
+    expect(regimenInputIssue(fd, "chosen")).toContain("N/A");
+    fd.set("chosen_freq_time_unspecified", "on");
+    const plan = readRegimenInput(fd, "chosen")!;
+    expect(plan.dose_amount).toBe(60);
+    expect(plan.frequency).toMatchObject({ days: [1, 4, 6], time: null, weekly_total: 180 });
+    expect(regimenInputIssue(fd, "chosen")).toBeNull();
+    expect(describePlan(plan, "Example medication")).toContain("60 mg on Monday, Thursday, and Saturday, with no set time of day");
+    expect(isFrequency(JSON.parse(JSON.stringify(plan.frequency)))).toBe(true);
+  });
+  it("retains calendar dates without inventing timed PK doses", () => {
+    const frequency = { ...weekly, time: null };
+    const start = Date.parse("2026-09-21T00:00:00Z"), end = Date.parse("2026-09-28T00:00:00Z");
+    expect(occurrencesInWindow(frequency, start, start, end)).toHaveLength(3);
+    expect(generateScheduledDoses(frequency, 60, start, end)).toEqual([]);
+  });
+  it("matches untimed logs anywhere on the selected local day, never the following day", async () => {
+    const { computeAdherence } = await import("@/lib/report/report-data");
+    const frequency = { ...weekly, time: null, days: [1] };
+    const start = Date.parse("2026-09-21T04:00:00Z"), end = Date.parse("2026-09-28T04:00:00Z");
+    expect(computeAdherence(frequency, start, start, end, [Date.parse("2026-09-22T03:59:00Z")], 0).coveredCount).toBe(1);
+    expect(computeAdherence(frequency, start, start, end, [Date.parse("2026-09-22T04:01:00Z")], 0).coveredCount).toBe(0);
   });
 });

@@ -68,7 +68,7 @@ export async function generateReminders(
   if (!regimen) return 0;
 
   const freq = regimen.frequency;
-  if (!isFrequency(freq) || freq.type === "as_needed") return 0;
+  if (!isFrequency(freq) || freq.type === "as_needed" || (freq.type === "weekly" && freq.time === null)) return 0;
 
   const now = Date.now();
   const endMs = now + lookAheadDays * MS_PER_DAY;
@@ -147,6 +147,12 @@ export async function sendReminder(reminderId: string): Promise<boolean> {
 
   if (!reminder || reminder.status !== "pending") return false;
 
+  // A queued reminder may race with a plan edit. Recheck before delivery so an
+  // untimed plan never acquires a clock time from an older pending reminder.
+  const { data: activeRegimen } = await admin.from("chosen_regimens").select("frequency")
+    .eq("medication_id", reminder.medication_id).eq("active", true).maybeSingle();
+  if (isFrequency(activeRegimen?.frequency) && activeRegimen.frequency.type === "weekly" && activeRegimen.frequency.time === null) return false;
+
   // Load medication display name (not a health value — just the name for the notification).
   const { data: med } = await admin
     .from("medications")
@@ -220,6 +226,9 @@ export async function checkEscalations(): Promise<number> {
     .not("escalation_user_id", "is", null);
 
   for (const schedule of schedules ?? []) {
+    const { data: activeRegimen } = await admin.from("chosen_regimens").select("frequency")
+      .eq("medication_id", schedule.medication_id).eq("active", true).maybeSingle();
+    if (isFrequency(activeRegimen?.frequency) && activeRegimen.frequency.type === "weekly" && activeRegimen.frequency.time === null) continue;
     const delayMs = (schedule.escalation_delay_min as number) * 60_000;
     const cutoff = new Date(now - delayMs).toISOString();
 

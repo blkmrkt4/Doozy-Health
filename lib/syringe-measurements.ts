@@ -43,6 +43,14 @@ export function parseNeedleGauge(raw: string): number | null {
   return value != null && Number.isInteger(value) ? value : null;
 }
 
+/** Only explicit volume spacing is usable as a scale; a printed scale number
+ * or insulin-unit label alone does not establish the smallest graduation. */
+export function syringeMarkSpacing(raw: string | undefined, capacity: number): number | null {
+  const text = (raw ?? "").trim().replace(/\s*(?:increments?|between (?:lines|marks))$/i, "");
+  const spacing = parseSyringeCapacity(text);
+  return spacing != null && capacity > 0 && spacing <= capacity ? spacing : null;
+}
+
 export function formatNeedleLength(inches: number): string {
   const eighths = Math.round(inches * 8);
   let imperial: string;
@@ -67,7 +75,7 @@ export function readSyringeMeasurements(formData: FormData, prefix = "", require
   const length = hasLengthEntry ? field("needle_length") : field("needle_length_in");
   const unit = hasLengthEntry ? field("needle_length_unit") || "in" : "in";
   const spec: Partial<SyringeSpec> = {};
-  const errors: { capacity?: string; gauge?: string; length?: string } = {};
+  const errors: { capacity?: string; gauge?: string; length?: string; markings?: string } = {};
   if (capacity) {
     const value = parseSyringeCapacity(capacity);
     if (value == null) errors.capacity = "Enter a positive syringe capacity, such as 1 mL.";
@@ -83,7 +91,20 @@ export function readSyringeMeasurements(formData: FormData, prefix = "", require
     if (value == null) errors.length = "Enter a positive length, such as 5/8 inches or 16 mm.";
     else spec.needle_length_in = value;
   }
-  if (field("unit_markings")) spec.unit_markings = field("unit_markings");
+  const markingsMode = field("markings_mode");
+  if (markingsMode === "count" || markingsMode === "spacing") {
+    const cap = spec.capacity_mL;
+    const raw = field("markings_value");
+    const count = Number(raw);
+    const spacing = markingsMode === "count"
+      ? cap && raw && Number.isInteger(count) && count > 0 ? cap / count : null
+      : cap ? syringeMarkSpacing(raw, cap) : null;
+    if (!cap) errors.capacity = "Enter the syringe capacity to work out its markings.";
+    if (!spacing || !Number.isFinite(spacing)) errors.markings = markingsMode === "count"
+      ? "Enter the number of equal spaces from zero to full capacity, such as 10."
+      : "Enter the mL between neighboring lines, no greater than the syringe capacity.";
+    else spec.unit_markings = `${spacing} mL increments`;
+  } else if (markingsMode !== "unknown" && field("unit_markings")) spec.unit_markings = field("unit_markings");
   if (requireCapacityForDetails && !capacity && (gauge || length || spec.unit_markings)) {
     errors.capacity = "Enter the syringe capacity, or clear its details.";
   }

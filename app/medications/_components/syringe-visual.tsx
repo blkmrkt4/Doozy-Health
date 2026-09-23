@@ -9,7 +9,8 @@
 // needle on the right; 0 sits at the needle end (where the liquid draws to) and
 // the scale increases toward the plunger, matching a real syringe.
 
-import { doseToVolumeMl, formatVolumeMl } from "@/lib/units";
+import { syringeMarkSpacing } from "@/lib/syringe-measurements";
+import { doseToVolumeMl } from "@/lib/units";
 
 const VB_W = 360;
 const VB_H = 96;
@@ -25,11 +26,13 @@ export function SyringeVisual({
   concentrationAmount,
   concentrationPerVolume,
   syringeCapacityMl,
+  syringeUnitMarkings,
 }: {
   doseAmount: number;
   concentrationAmount: number;
   concentrationPerVolume: number;
   syringeCapacityMl: number;
+  syringeUnitMarkings?: string;
 }) {
   if (
     !Number.isFinite(doseAmount) ||
@@ -52,18 +55,18 @@ export function SyringeVisual({
   const xForFrac = (frac: number) => BARREL_RIGHT - BARREL_W * frac;
   const fillX = xForFrac(fillFraction);
 
-  // Markings at even intervals; label precision follows the step size so a
-  // 1 mL syringe reads 0.0–1.0 and a 0.5 mL one reads 0.00–0.50.
-  const markCount = syringeCapacityMl <= 1 ? 10 : 5;
-  const step = syringeCapacityMl / markCount;
-  const decimals = step < 0.1 ? 2 : step < 1 ? 1 : 0;
-  const markings = Array.from({ length: markCount + 1 }, (_, i) => {
-    const frac = i / markCount;
+  // Only draw graduations supplied by the user, never infer them from capacity.
+  const step = syringeMarkSpacing(syringeUnitMarkings, syringeCapacityMl);
+  const markCount = step ? Math.floor(syringeCapacityMl / step + 1e-9) : 0;
+  const stride = Math.max(1, Math.ceil(markCount / 200));
+  const labelEvery = Math.max(1, Math.ceil(markCount / 10 / stride)) * stride;
+  const markings = step ? Array.from({ length: Math.floor(markCount / stride) + 1 }, (_, i) => {
+    const index = i * stride;
     return {
-      x: xForFrac(frac),
-      label: (syringeCapacityMl * frac).toFixed(decimals),
+      x: xForFrac(index * step / syringeCapacityMl),
+      label: index % labelEvery === 0 ? Number((index * step).toPrecision(6)).toLocaleString("en-US", { maximumSignificantDigits: 6 }) : "",
     };
-  });
+  }) : [];
 
   return (
     <div className="flex w-full max-w-xl flex-col gap-2">
@@ -121,9 +124,10 @@ export function SyringeVisual({
       </svg>
 
       <p className="tabular text-sm text-paper">
-        {formatVolumeMl(volumeMl, syringeCapacityMl)}
-        <span className="ml-2 text-xs text-faint">Fill to the yellow line</span>
+        {Number(volumeMl.toPrecision(6))} mL
+        <span className="ml-2 text-xs text-faint">Calculated volume from the entered dose and concentration</span>
       </p>
+      {!step && <p className="text-xs text-faint">Volume illustration only. Syringe markings have not been entered.</p>}
     </div>
   );
 }

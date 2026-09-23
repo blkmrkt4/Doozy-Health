@@ -5,7 +5,7 @@ vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => mock }));
 vi.mock("@/lib/push", () => ({ sendPushNotification: vi.fn() }));
 vi.mock("@/lib/sms", () => ({ sendSms: vi.fn() }));
 vi.mock("@/lib/notifications-server", () => ({ createNotification: vi.fn() }));
-import { generateReminders, refreshMedicationReminders, ReminderScheduleError } from "@/lib/reminders";
+import { generateReminders, refreshMedicationReminders, sendReminder, ReminderScheduleError } from "@/lib/reminders";
 
 type Row = Record<string, unknown>;
 let data: Record<string, Row[]>;
@@ -92,4 +92,20 @@ it("retains the phase of long legacy intervals outside the generated window", as
   const anchor = Date.parse(String(data.dose_schedules[0].next_due_at));
   await generateReminders("s");
   expect(new Date(String(data.dose_schedules[0].next_due_at)).getTime()).toBe(anchor + 720 * 86_400_000);
+});
+
+
+it("clears pending timed reminders and generates none for an untimed weekly plan", async () => {
+  data.chosen_regimens[0].frequency = { type: "weekly", days: [1, 4, 6], time: null, time_zone: "America/Toronto" };
+  data.dose_reminders.push({ schedule_id: "s", due_at: "2026-09-22T09:00:00Z", status: "pending" });
+  await refreshMedicationReminders("m");
+  expect(data.dose_reminders).toHaveLength(0);
+  expect(await generateReminders("s")).toBe(0);
+});
+
+it("does not send an old pending reminder after the plan becomes untimed", async () => {
+  data.chosen_regimens[0].frequency = { type: "weekly", days: [1], time: null, time_zone: "America/Toronto" };
+  data.dose_reminders.push({ id: "old", medication_id: "m", schedule_id: "s", status: "pending", channel: "push" });
+  expect(await sendReminder("old")).toBe(false);
+  expect(mock.from).not.toHaveBeenCalledWith("medications");
 });

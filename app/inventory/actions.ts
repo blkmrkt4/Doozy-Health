@@ -207,7 +207,7 @@ export async function confirmSyringeExtraction(formData: FormData) {
           capacity_ml: spec.capacity_mL == null ? "" : String(spec.capacity_mL),
           needle_gauge: spec.needle_gauge == null ? "" : String(spec.needle_gauge),
           needle_length_in: spec.needle_length_in == null ? "" : String(spec.needle_length_in),
-          unit_markings: str(formData, "unit_markings"),
+          unit_markings: String(spec.unit_markings ?? ""),
           manufacturer: str(formData, "manufacturer"),
           batch: str(formData, "batch"),
         },

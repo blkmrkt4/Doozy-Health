@@ -413,6 +413,7 @@ export function generateScheduledDoses(
   rangeEnd: number
 ): DoseEvent[] {
   if (!isFrequency(frequency)) return [];
+  if (frequency.type === "weekly" && frequency.time === null) return [];
   return occurrencesInWindow(frequency, rangeStart, rangeStart, rangeEnd + 1)
     .map((timestamp) => ({ timestamp, amount: doseAmount }));
 }

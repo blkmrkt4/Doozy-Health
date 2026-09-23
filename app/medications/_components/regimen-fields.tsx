@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { DOSE_UNITS, ROUTES, type Frequency } from "@/lib/types";
-import { PLAIN_ROUTES, WEEKDAYS, readRegimenInput, readableNumber, type RegimenInput } from "@/lib/regimen-plan";
+import { PLAIN_ROUTES, WEEKDAYS, readRegimenInput, regimenInputIssue, readableNumber, type RegimenInput } from "@/lib/regimen-plan";
 
 export type FrequencyInitial = {
   type?: Frequency["type"]; interval?: number; unit?: string; count?: number; period?: string;
-  days?: number[]; time?: string; time_zone?: string; weekly_total?: number;
+  days?: number[]; time?: string | null; time_zone?: string; weekly_total?: number;
 };
 export type RegimenInitial = { doseAmount?: string; doseUnit?: string; route?: string; freq?: FrequencyInitial };
 const input = "mt-1 block min-h-11 w-full rounded-md border border-line bg-surface px-3 py-2 text-base text-paper";
@@ -24,9 +24,11 @@ function initialPreset(f?: FrequencyInitial): string {
 
 /** Plain-language editor, shared by prescription and chosen plan. The posted
  * fields use the same defensive parser as the server (PRD §4.1/§5.3). */
-export function RegimenFields({ prefix, initial = {}, split = false, onPlanChange }: {
+export function RegimenFields({ prefix, initial = {}, split = false, onPlanChange, onRouteChange, onIssueChange }: {
   prefix: string; initial?: RegimenInitial; split?: boolean;
   onPlanChange: (plan: RegimenInput | null) => void;
+  onRouteChange?: (route: string) => void;
+  onIssueChange?: (issue: string | null) => void;
 }) {
   const [preset, setPreset] = useState(split ? "weekly" : initialPreset(initial.freq));
   const [amount, setAmount] = useState(initial.doseAmount ?? "");
@@ -39,6 +41,7 @@ export function RegimenFields({ prefix, initial = {}, split = false, onPlanChang
   const [count, setCount] = useState(String(initial.freq?.count ?? 1));
   const [period, setPeriod] = useState(initial.freq?.period ?? "day");
   const [days, setDays] = useState<number[]>(initial.freq?.days ?? []);
+  const [noTime, setNoTime] = useState(initial.freq?.time === null);
   const [time, setTime] = useState(initial.freq?.time ?? "");
   const [zone, setZone] = useState(initial.freq?.time_zone ?? "");
   useEffect(() => {
@@ -56,15 +59,20 @@ export function RegimenFields({ prefix, initial = {}, split = false, onPlanChang
       [`${prefix}_freq_interval`]: preset === "daily" || preset === "once_weekly" ? "1" : interval,
       [`${prefix}_freq_unit`]: preset === "daily" ? "day" : preset === "once_weekly" ? "week" : intervalUnit,
       [`${prefix}_freq_count`]: count, [`${prefix}_freq_period`]: period,
+      [`${prefix}_freq_time_unspecified`]: noTime ? "on" : "",
       [`${prefix}_freq_days`]: days.map(String), [`${prefix}_freq_time`]: time, [`${prefix}_freq_time_zone`]: zone,
     };
     return f;
-  }, [prefix, amount, unit, route, weeklyTotalMode, total, preset, interval, intervalUnit, count, period, days, time, zone]);
-  const plan = useMemo(() => {
+  }, [prefix, amount, unit, route, weeklyTotalMode, total, preset, interval, intervalUnit, count, period, days, time, zone, noTime]);
+  const formData = useMemo(() => {
     const fd = new FormData();
     for (const [key, value] of Object.entries(fields)) for (const v of Array.isArray(value) ? value : [value]) fd.append(key, v);
-    return readRegimenInput(fd, prefix);
+    return fd;
   }, [fields, prefix]);
+  const plan = useMemo(() => readRegimenInput(formData, prefix), [formData, prefix]);
+  const issue = regimenInputIssue(formData, prefix);
+  useEffect(() => onRouteChange?.(route), [onRouteChange, route]);
+  useEffect(() => onIssueChange?.(issue), [onIssueChange, issue]);
   useEffect(() => onPlanChange(plan), [onPlanChange, plan]);
 
   function changeBasis(next: string) {
@@ -102,8 +110,19 @@ export function RegimenFields({ prefix, initial = {}, split = false, onPlanChang
       <div className="flex flex-wrap gap-2">{WEEKDAYS.map((day, i) => <button key={day} type="button" aria-label={day} aria-pressed={days.includes(i + 1)} onClick={() => setDays((current) => current.includes(i + 1) ? current.filter((d) => d !== i + 1) : [...current, i + 1].sort((a, b) => a - b))} className={`min-h-11 min-w-11 rounded-md border px-3 text-sm ${days.includes(i + 1) ? "border-accent bg-accent-surface text-accent" : "border-line bg-surface text-paper"}`}>{day.slice(0, 3)}</button>)}</div>
       <button type="button" onClick={() => setDays([1, 2, 3, 4, 5, 6, 7])} className="min-h-11 text-sm text-paper underline">Every day</button>
       <p className="text-sm text-muted">{days.length ? `${days.length} ${days.length === 1 ? "dose" : "doses"} per week · one on each selected day` : "Choose at least one day."}</p>
-      <div className="grid gap-3 sm:grid-cols-2"><label className={label}>Time on these days<input type="time" className={input} required defaultValue={time} onChange={(e) => setTime(e.target.value)} /></label><label className={label}>Time zone<input className={input} list={`${prefix}-zones`} required value={zone} onChange={(e) => setZone(e.target.value)} /><datalist id={`${prefix}-zones`}>{Array.from(new Set([zone, "America/Toronto", "America/Vancouver", "America/New_York", "America/Los_Angeles", "Europe/London", "Europe/Paris", "Australia/Sydney", "UTC"])).map((z) => <option key={z} value={z} />)}</datalist></label></div>
-      <p className="text-xs text-faint">Times follow this time zone, including daylight saving. A time skipped by a clock change moves forward with the clock; a repeated time appears once.</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-sm text-muted">Time on these days</span>
+        <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-paper">
+          <input type="checkbox" checked={noTime} onChange={(e) => { setNoTime(e.target.checked); if (e.target.checked) setZone(Intl.DateTimeFormat().resolvedOptions().timeZone); }} className="accent-accent" />
+          N/A — no set time
+        </label>
+      </div>
+      {!noTime && <div className="grid gap-3 sm:grid-cols-2">
+        <label className={label}>Time<input type="time" className={input} required defaultValue={time} onChange={(e) => setTime(e.target.value)} /></label>
+        <label className={label}>Time zone<input className={input} list={`${prefix}-zones`} required value={zone} onChange={(e) => setZone(e.target.value)} /><datalist id={`${prefix}-zones`}>{Array.from(new Set([zone, "America/Toronto", "America/Vancouver", "America/New_York", "America/Los_Angeles", "Europe/London", "Europe/Paris", "Australia/Sydney", "UTC"])).map((z) => <option key={z} value={z} />)}</datalist></label>
+      </div>}
+      <p className="text-xs text-faint">{noTime ? "Your selected days stay on the calendar. No timed reminders are scheduled for this plan." : "Times follow this time zone, including daylight saving. A time skipped by a clock change moves forward with the clock; a repeated time appears once."}</p>
+      {issue && <p className="text-sm text-muted">{issue}</p>}
       {plan && <p className="text-sm text-paper">{weeklyTotalMode ? `${readableNumber(Number(total))} ${unit} ÷ ${days.length} = ${readableNumber(plan.dose_amount)} ${unit} each time.` : `${readableNumber(plan.dose_amount)} ${unit} × ${days.length} = ${readableNumber(plan.dose_amount * days.length)} ${unit} per week.`}{weeklyTotalMode && Number(total) / days.length !== Number((Number(total) / days.length).toFixed(Number(total) / days.length < 0.01 ? 6 : 2)) ? " Display rounded; the entered weekly total is kept." : ""}</p>}
     </fieldset>}
   </div>;

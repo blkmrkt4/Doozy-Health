@@ -21,6 +21,7 @@ import {
   ROUTES,
   normaliseRoute,
   guessFormType,
+  isFrequency,
   isCountDoseUnit,
   type Concentration,
   type Frequency,
@@ -1653,6 +1654,12 @@ export async function enableSchedule(formData: FormData) {
     .eq("id", medicationId)
     .single();
   if (!med) failDose(medicationId, "Medication not found.");
+
+  const { data: chosen } = await supabase.from("chosen_regimens").select("frequency")
+    .eq("medication_id", medicationId).eq("active", true).maybeSingle();
+  if (isFrequency(chosen?.frequency) && chosen.frequency.type === "weekly" && chosen.frequency.time === null) {
+    failDose(medicationId, "This plan has no set time. Add a time to the plan to enable timed reminders.");
+  }
 
   const now = new Date();
   const scheduleId = crypto.randomUUID();

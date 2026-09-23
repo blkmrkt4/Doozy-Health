@@ -193,7 +193,8 @@ export type Frequency =
 export type WeeklyFrequency = {
   type: "weekly";
   days: number[];
-  time: string;
+  /** null means a calendar day with no chosen clock time. */
+  time: string | null;
   time_zone: string;
   /** Preserve the user's total instead of reconstructing it from a rounded dose. */
   weekly_total?: number;
@@ -414,7 +415,7 @@ export function isFrequency(v: unknown): v is Frequency {
     return Array.isArray(f.days) && f.days.length > 0 && f.days.length <= 7 &&
       f.days.every((d) => Number.isInteger(d) && d >= 1 && d <= 7) &&
       new Set(f.days).size === f.days.length &&
-      typeof f.time === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(f.time) &&
+      (f.time === null || (typeof f.time === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(f.time))) &&
       isTimeZone(f.time_zone) &&
       (f.weekly_total === undefined ||
         (typeof f.weekly_total === "number" && Number.isFinite(f.weekly_total) && f.weekly_total > 0));

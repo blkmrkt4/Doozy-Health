@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatNeedleLength, parseNeedleLength, parseNeedleGauge, parseSyringeCapacity, readSyringeMeasurements } from "@/lib/syringe-measurements";
+import { formatNeedleLength, parseNeedleLength, parseNeedleGauge, parseSyringeCapacity, readSyringeMeasurements, syringeMarkSpacing } from "@/lib/syringe-measurements";
 
 describe("package measurements", () => {
   it.each(["5/8", "5 / 8", "⅝", "5⁄8", "0.625", '5/8"', "5/8 in", "5/8 inches"])("accepts %s as five eighths of an inch", (text) => {
@@ -68,5 +68,30 @@ describe("syringe form parsing", () => {
     const fd = new FormData();
     fd.set("syringe_needle_length", "5/8");
     expect(readSyringeMeasurements(fd, "syringe_", true).errors.capacity).toBeTruthy();
+  });
+});
+
+
+describe("syringe scale entry", () => {
+  it("converts ten equal spaces on a 1 mL syringe into 0.1 mL spacing", () => {
+    const fd = new FormData();
+    fd.set("capacity_ml", "1 mL"); fd.set("markings_mode", "count"); fd.set("markings_value", "10");
+    const result = readSyringeMeasurements(fd);
+    expect(result.errors).toEqual({});
+    expect(result.spec.unit_markings).toBe("0.1 mL increments");
+    expect(syringeMarkSpacing(result.spec.unit_markings, 1)).toBe(0.1);
+    fd.set("markings_mode", "spacing"); fd.set("markings_value", ".1");
+    expect(readSyringeMeasurements(fd).spec.unit_markings).toBe(result.spec.unit_markings);
+  });
+  it.each(["", "0", "-1", "2.5", "Infinity"])("rejects an invalid space count %s", (value) => {
+    const fd = new FormData();
+    fd.set("capacity_ml", "1"); fd.set("markings_mode", "count"); fd.set("markings_value", value);
+    expect(readSyringeMeasurements(fd).errors.markings).toBeTruthy();
+  });
+  it("does not infer scale from capacity or a printed insulin-unit label", () => {
+    expect(syringeMarkSpacing(undefined, 1)).toBeNull();
+    expect(syringeMarkSpacing("U-100", 1)).toBeNull();
+    const fd = new FormData(); fd.set("capacity_ml", "1"); fd.set("markings_mode", "unknown"); fd.set("unit_markings", ".1");
+    expect(readSyringeMeasurements(fd).spec.unit_markings).toBeUndefined();
   });
 });

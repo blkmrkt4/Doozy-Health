@@ -1,5 +1,5 @@
 import {
-  DOSE_UNITS, ROUTES, isFrequency, type DoseUnit, type Frequency, type Route,
+  DOSE_UNITS, ROUTES, isFrequency, isTimeZone, type DoseUnit, type Frequency, type Route,
 } from "@/lib/types";
 
 export const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -30,7 +30,7 @@ export function readableDays(days: number[]): string {
 }
 
 export function describeFrequency(f: Frequency): string {
-  if (f.type === "weekly") return `${readableDays(f.days)} at ${readableTime(f.time)} (${f.time_zone})`;
+  if (f.type === "weekly") return f.time === null ? `${readableDays(f.days)}, with no set time of day` : `${readableDays(f.days)} at ${readableTime(f.time)} (${f.time_zone})`;
   if (f.type === "as_needed") return "as needed, with no fixed schedule";
   if (f.type === "times_per") return `${f.count} ${f.count === 1 ? "time" : "times"} per ${f.period}`;
   return f.interval === 1 ? `every ${f.unit}` : `every ${f.interval} ${f.unit}s`;
@@ -55,7 +55,7 @@ export function parsePlanFrequency(fd: FormData, prefix: string): Frequency | nu
   const type = value("type");
   let candidate: unknown;
   if (type === "weekly") {
-    candidate = { type, days: fd.getAll(`${prefix}_days`).map(Number).sort((a, b) => a - b), time: value("time"), time_zone: value("time_zone") };
+    candidate = { type, days: fd.getAll(`${prefix}_days`).map(Number).sort((a, b) => a - b), time: value("time_unspecified") === "on" ? null : value("time"), time_zone: value("time_zone") };
   } else if (type === "every") {
     candidate = { type, interval: Number(value("interval")), unit: value("unit") };
   } else if (type === "times_per") {
@@ -87,4 +87,19 @@ export function weeklyTotal(plan: RegimenInput): number | null {
   if (f.type === "as_needed" || (f.type === "every" && f.unit === "month")) return null;
   if (f.type === "times_per") return plan.dose_amount * f.count * (f.period === "week" ? 1 : 7);
   return plan.dose_amount * ({ hour: 168, day: 7, week: 1 }[f.unit as "hour" | "day" | "week"]) / f.interval;
+}
+
+/** Explain the first missing detail instead of leaving a disabled save unexplained. */
+export function regimenInputIssue(fd: FormData, prefix: string): string | null {
+  if (readRegimenInput(fd, prefix)) return null;
+  const value = (name: string) => String(fd.get(`${prefix}_${name}`) ?? "");
+  const total = value("amount_basis") === "weekly_total";
+  const amount = Number(value(total ? "weekly_total" : "dose_amount"));
+  if (!Number.isFinite(amount) || amount <= 0) return total ? "Enter the total for the week." : "Enter the amount each time.";
+  if (value("freq_type") === "weekly") {
+    if (!fd.getAll(`${prefix}_freq_days`).length) return "Choose at least one day of the week.";
+    if (value("freq_time_unspecified") !== "on" && !value("freq_time")) return "Choose a time, or select N/A — no set time.";
+    if (!isTimeZone(value("freq_time_zone"))) return "Enter a valid time zone.";
+  }
+  return "Check the amount, units, route, and schedule.";
 }

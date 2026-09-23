@@ -17,6 +17,7 @@ import {
 import {
   DILUENTS,
   FORM_TYPES,
+  guessFormType,
   FORM_TYPE_LABELS,
   INJECTABLE_FORM_TYPES,
   type FormType,
@@ -125,6 +126,11 @@ export function MedicationForm({
   const [planMode, setPlanMode] = useState<"same" | "split" | "custom">(
     init.chosen?.differs ? "custom" : "same"
   );
+  const [prescriptionIssue, setPrescriptionIssue] = useState<string | null>(null);
+  const [chosenIssue, setChosenIssue] = useState<string | null>(null);
+  const [prescribedRoute, setPrescribedRoute] = useState(init.prescribed?.route ?? "oral");
+  const [chosenRoute, setChosenRoute] = useState(init.chosen?.route ?? init.prescribed?.route ?? "oral");
+  const [formChosen, setFormChosen] = useState(!!init.delivery?.formType);
   const [confirmed, setConfirmed] = useState(false);
   const [nameText, setNameText] = useState(init.drugName ?? "");
   // Default to a tablet, not a vial: most medications are oral, and defaulting
@@ -135,6 +141,10 @@ export function MedicationForm({
   );
   const choseDiffers = planMode !== "same";
   const activePlan = choseDiffers ? chosenPlan : prescription;
+
+  useEffect(() => {
+    if (!formChosen) setFormType(guessFormType({ route: choseDiffers ? chosenRoute : prescribedRoute, concentrationAmount: null, concentrationPerVolume: null }));
+  }, [formChosen, choseDiffers, chosenRoute, prescribedRoute]);
 
   const showSyringe = INJECTABLE_FORM_TYPES.has(formType);
 
@@ -181,7 +191,7 @@ export function MedicationForm({
   const ready = nameText.trim().length > 0 && !!prescription && !!activePlan;
   const prescriptionTotal = prescription ? weeklyTotal(prescription) : null;
   const chosenTotal = activePlan ? weeklyTotal(activePlan) : null;
-  const summary = activePlan ? describePlan(activePlan, nameText) : "Complete the amount and schedule to see your plan here.";
+  const summary = activePlan ? describePlan(activePlan, nameText) : choseDiffers ? `Your chosen plan: ${chosenIssue ?? "Enter your amount and schedule."}` : `Prescription: ${prescriptionIssue ?? "Enter your amount and schedule."}`;
   useEffect(() => setConfirmed(false), [activePlan, prescription, nameText]);
 
   // The at-a-glance list of what THIS product needs. It adapts to what we know:
@@ -294,7 +304,7 @@ export function MedicationForm({
         defaultOpen
         hint="Enter the amount and timing written on the prescription. Your chosen schedule comes next."
       >
-        <RegimenFields prefix="prescribed" initial={init.prescribed} onPlanChange={setPrescription} />
+        <RegimenFields prefix="prescribed" initial={init.prescribed} onPlanChange={setPrescription} onRouteChange={setPrescribedRoute} onIssueChange={setPrescriptionIssue} />
         <details className="rounded-md border border-line p-3">
           <summary className="cursor-pointer text-sm text-muted">Optional prescription details</summary>
           <div className="mt-3 space-y-3">
@@ -338,6 +348,8 @@ export function MedicationForm({
             doseUnit: prescription?.dose_unit, route: prescription?.route, freq: prescription?.frequency,
           }}
           onPlanChange={setChosenPlan}
+          onRouteChange={setChosenRoute}
+          onIssueChange={setChosenIssue}
         />}
         {choseDiffers && prescriptionTotal != null && chosenTotal != null && <p className="text-sm text-muted">
           {prescription?.dose_unit === activePlan?.dose_unit
@@ -358,10 +370,11 @@ export function MedicationForm({
       >
         <label className={labelCls}>
           Form
-          <select name="form_type" value={formType} onChange={(e) => setFormType(e.target.value as FormType)} className={inputCls}>
+          <select name="form_type" value={formType} onChange={(e) => { setFormChosen(true); setFormType(e.target.value as FormType); }} className={inputCls}>
             {FORM_TYPES.map((f) => (<option key={f} value={f}>{FORM_TYPE_LABELS[f]}</option>))}
           </select>
         </label>
+        {!formChosen && <p className="text-xs text-faint">Suggested from the route you entered. You can change it.</p>}
         <DeliveryLabelFields
           formType={formType}
           initial={init.delivery}
@@ -440,6 +453,8 @@ export function MedicationForm({
       <section className="space-y-3 rounded-md border border-line border-l-4 border-l-accent bg-surface p-4" aria-labelledby="plan-readback-heading">
         <h2 id="plan-readback-heading" className="text-base font-medium text-paper">Your chosen plan</h2>
         <p aria-live="polite" className="blur-private text-lg leading-relaxed text-paper">{summary}</p>
+        {!prescription && choseDiffers && <p className="text-sm text-muted">Prescription: {prescriptionIssue ?? "Enter the prescription amount and schedule."}</p>}
+        {!nameText.trim() && <p className="text-sm text-muted">Enter the medication name.</p>}
         <label className="flex min-h-11 items-center gap-3 text-sm text-paper">
           <input type="checkbox" name="plan_confirmed" required disabled={!ready} checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} className="h-5 w-5 accent-accent" />
           Yes, this describes the plan I entered.

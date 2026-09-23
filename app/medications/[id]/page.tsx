@@ -190,16 +190,18 @@ export default async function MedicationDetailPage({
     : false;
 
   // The chosen syringe (inventory) drives the calibrated visual size; fall back
-  // to the delivery form's spec, then 1 mL (PRD §5.1).
+  // to the delivery form's spec (PRD §5.1). Do not invent a capacity.
   let linkedSyringeCapacityMl: number | null = null;
+  let linkedSyringeMarkings: string | undefined;
   if (med.syringe_id) {
     const { data: syr } = await supabase
       .from("inventory_items")
       .select("spec")
       .eq("id", med.syringe_id)
       .maybeSingle();
-    const spec = (syr?.spec ?? null) as { capacity_mL?: number } | null;
+    const spec = (syr?.spec ?? null) as { capacity_mL?: number; unit_markings?: string } | null;
     linkedSyringeCapacityMl = spec?.capacity_mL ?? null;
+    linkedSyringeMarkings = spec?.unit_markings;
   }
   const resolvedCapacityMl =
     linkedSyringeCapacityMl ?? delivery?.syringe_spec?.capacity_mL ?? null;
@@ -709,7 +711,8 @@ export default async function MedicationDetailPage({
                   doseAmount={Number(chosen.dose_amount)}
                   concentrationAmount={delivery.concentration.amount}
                   concentrationPerVolume={delivery.concentration.per_volume ?? 1}
-                  syringeCapacityMl={resolvedCapacityMl ?? 1}
+                  syringeCapacityMl={resolvedCapacityMl ?? 0}
+                  syringeUnitMarkings={linkedSyringeCapacityMl != null ? linkedSyringeMarkings : delivery?.syringe_spec?.unit_markings}
                 />
               ) : null}
               <LogDoseForm
@@ -860,7 +863,9 @@ export default async function MedicationDetailPage({
           (chosen.frequency as { type: string }).type !== "as_needed" ? (
           <section className="rounded-md border border-line p-4 space-y-3">
             <h2 className="text-sm font-medium text-paper">Reminders</h2>
-            {schedule ? (
+            {isFrequency(chosen.frequency) && chosen.frequency.type === "weekly" && chosen.frequency.time === null ? (
+              <p className="text-sm text-muted">No timed reminders: your plan has no set time of day. The selected weekdays remain on your calendar.</p>
+            ) : schedule ? (
               <>
                 <p className="text-sm text-muted">
                   Reminders enabled. Next due{" "}

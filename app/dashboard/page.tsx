@@ -430,7 +430,7 @@ export default async function DashboardPage({
         taken: true,
       }));
       // Project the chosen cadence forward two weeks (dashed, after "now").
-      const future: AisDoseEvent[] = occurrencesInWindow(
+      const future: AisDoseEvent[] = chosen.frequency.type === "weekly" && chosen.frequency.time === null ? [] : occurrencesInWindow(
         chosen.frequency,
         nowMs,
         nowMs + 1,

@@ -1,3 +1,4 @@
+import { zonedDayKey } from "@/lib/weekly-schedule";
 import {
   occurrencesInWindow,
   averageIntervalMs,
@@ -366,13 +367,14 @@ export function computeAdherence(
   const sortedTaken = [...takenMs].sort((a, b) => a - b);
   const used = new Array(sortedTaken.length).fill(false);
   const covered: boolean[] = scheduled.map((occ, index) => {
-    const localTol = freq.type === "weekly"
+    const localTol = freq.type === "weekly" && freq.time === null ? Infinity : freq.type === "weekly"
       ? Math.min(occ - (scheduled[index - 1] ?? occ - intervalMs), (scheduled[index + 1] ?? occ + intervalMs) - occ) / 2
       : tol;
     let bestIdx = -1;
     let bestDist = Infinity;
     for (let i = 0; i < sortedTaken.length; i++) {
       if (used[i]) continue;
+      if (freq.type === "weekly" && freq.time === null && zonedDayKey(sortedTaken[i], freq.time_zone) !== zonedDayKey(occ, freq.time_zone)) continue;
       const d = Math.abs(sortedTaken[i] - occ);
       if (d <= localTol && d < bestDist) {
         bestDist = d;

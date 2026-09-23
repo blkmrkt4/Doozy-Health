@@ -38,7 +38,8 @@ export function weeklyOccurrences(freq: WeeklyFrequency, start: number, end: num
   });
   const first = localParts(start, formatter);
   const last = localParts(end, formatter);
-  const [hour, minute] = freq.time.split(":").map(Number);
+  // Untimed plans use a date boundary only for calendar counting, never reminders.
+  const [hour, minute] = (freq.time ?? "00:00").split(":").map(Number);
   const lastDay = Date.UTC(last[0], last[1] - 1, last[2]);
   const result: number[] = [];
   let day = Date.UTC(first[0], first[1] - 1, first[2]);
